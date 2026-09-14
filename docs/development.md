@@ -27,8 +27,9 @@ npm run check
 `npm run test:unit` needs no native compiler or audio device. `npm test` runs
 unit, process-transport, native decoder, PCM rendering, and lifecycle tests;
 first build both native test executables with `build:test-native`. Rebuild
-them after native changes. Tests fail rather than silently skip a missing
-test engine. Generated WAVs and small CC0 MP3/FLAC fixtures make tests offline.
+them after native changes. Tests verify build hashes and fail rather than
+silently use a stale or missing engine. Generated WAVs and small CC0 MP3/FLAC
+fixtures make tests offline.
 
 `npm run test:device` plays a quiet test tone through the real default output;
 use a desktop session with audio enabled. An optional filename can follow

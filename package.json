@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test test/*.test.mjs",
+    "test": "npm run build && node scripts/check-test-native.mjs && node --test test/*.test.mjs",
     "build:native": "node scripts/build-native.mjs",
     "build:test-native": "node scripts/build-native.mjs --test && node scripts/build-native.mjs --render-test",
     "test:unit": "npm run build && node --test test/player.test.mjs",

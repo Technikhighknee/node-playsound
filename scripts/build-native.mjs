@@ -13,6 +13,8 @@ mkdirSync(directory, { recursive: true });
 const output = resolve(directory, `playsound${render ? '-render-test' : test ? '-test' : ''}${platform === 'win32' ? '.exe' : ''}`);
 const compiler = process.env.CC ?? (process.platform === 'win32' ? 'clang' : 'cc');
 const flags = JSON.parse(process.env.CFLAGS_JSON ?? '[]');
+if (!Array.isArray(flags) || !flags.every(flag => typeof flag === 'string')) throw new Error('CFLAGS_JSON must be an array of arguments.');
+if (!test && flags.some(flag => flag.includes('PLAYSOUND_TEST'))) throw new Error('The test backend cannot be enabled in production builds.');
 const args = [...flags, '-std=c11', '-O2', '-g0', '-DNDEBUG', ...(test ? ['-DPLAYSOUND_TEST'] : []),
   render ? 'test/render.c' : 'native/player.c', '-o', output, ...(platform === 'win32' ? [] : ['-lpthread', '-lm', ...(platform === 'linux' ? ['-ldl'] : [])])];
 const result = spawnSync(compiler, args, { stdio: 'inherit', windowsHide: true });
@@ -21,8 +23,9 @@ if (result.status !== 0) process.exit(result.status ?? 1);
 chmodSync(output, 0o755);
 // Some Windows compilers emit a sidecar even when debug information is off.
 rmSync(output.replace(/\.exe$/, '') + '.pdb', { force: true });
-if (!test) writeFileSync(resolve(directory, 'manifest.json'), JSON.stringify({
+writeFileSync(test ? `${output}.json` : resolve(directory, 'manifest.json'), JSON.stringify({
   protocol: 1, platform, arch, sourceSha256: sourceHash(),
+  ...(render ? { renderSha256: createHash('sha256').update(readFileSync('test/render.c')).digest('hex') } : {}),
   binarySha256: createHash('sha256').update(readFileSync(output)).digest('hex'),
 }, null, 2) + '\n');
 console.log(output);

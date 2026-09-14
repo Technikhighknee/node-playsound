@@ -30,6 +30,9 @@ try {
   const installed = JSON.parse(readFileSync(join(consumer, 'node_modules/node-playsound/package.json'), 'utf8'));
   if (installed.dependencies || readdirSync(join(consumer, 'node_modules')).filter(name => !name.startsWith('.')).length !== 1)
     throw new Error('Installation pulled runtime dependencies.');
+  const engineFile = join(consumer, 'node_modules/node-playsound/bin', `${process.platform}-${process.arch}`, `playsound${process.platform === 'win32' ? '.exe' : ''}`);
+  const probe = spawnSync(engineFile, ['--null', '--parent', String(process.pid)], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+  if (probe.error || probe.status !== 2 || probe.stdout !== '') throw new Error('Installed production engine cannot execute correctly or accepts the test backend.');
   const source = `import { play, sound, Player, AudioError } from 'node-playsound';
 import assert from 'node:assert/strict';
 const cancelled = AbortSignal.abort();
