@@ -1,0 +1,77 @@
+name: Build and verify
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, target: win32-x64 }
+          - { os: windows-11-arm, target: win32-arm64 }
+          - { os: macos-15-intel, target: darwin-x64 }
+          - { os: macos-14, target: darwin-arm64 }
+          - { os: ubuntu-22.04, target: linux-x64 }
+          - { os: ubuntu-22.04-arm, target: linux-arm64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned Windows compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $arch = if ((node -p process.arch) -eq 'arm64') { 'aarch64' } else { 'x86_64' }
+          $hash = if ($arch -eq 'aarch64') { 'b5aac0ccc40dd91e8311b1f257717d8e3903b5fefb8f659de6d65a840ad1d0e7' } else { '554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c' }
+          New-Item -ItemType Directory -Force .tools | Out-Null
+          Invoke-WebRequest "https://ziglang.org/download/0.14.1/zig-$arch-windows-0.14.1.zip" -OutFile .tools/zig.zip
+          if ((Get-FileHash .tools/zig.zip).Hash.ToLower() -ne $hash) { throw 'Compiler checksum mismatch' }
+          Expand-Archive .tools/zig.zip -DestinationPath .tools
+          "CC=$((Resolve-Path .tools/zig-$arch-windows-0.14.1/zig.exe).Path)" >> $env:GITHUB_ENV
+          'CFLAGS_JSON=["cc"]' >> $env:GITHUB_ENV
+      - run: npm ci --ignore-scripts
+      - run: npm run build:native
+      - run: npm run build:test-native
+      - run: npm run check
+      - run: npm run test:package -- --local
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - run: npm test
+      - run: npm run test:package -- --local
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-${{ matrix.target }}
+          path: bin/
+          if-no-files-found: error
+  package:
+    needs: native
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: native-*
+          path: bin/
+          merge-multiple: true
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm run test:package
+      - run: npm pack
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-package
+          path: '*.tgz'
+          if-no-files-found: error
