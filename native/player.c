@@ -13,7 +13,7 @@
 
 #define MAX_VOICES 256
 #define MAX_LINE 131200
-typedef struct { unsigned id; ma_sound sound; } voice;
+typedef struct { unsigned id; ma_sound sound; int seeking; } voice;
 static voice voices[MAX_VOICES];
 static char mailbox[MAX_LINE];
 static ma_mutex inbox_lock;
@@ -82,6 +82,7 @@ static void finish(voice* v, const char* reason)
     unsigned id = v->id;
     ma_sound_uninit(&v->sound);
     v->id = 0;
+    v->seeking = 0;
     printf("DONE %u %s\n", id, reason);
 }
 
@@ -141,7 +142,32 @@ static int command(ma_engine* engine, char* line)
             return 1;
         }
         v->id = id;
+        v->seeking = 0;
         printf("STARTED %u\n", id);
+    } else if (op == 'Q') {
+        double seconds;
+        ma_uint32 rate;
+        ma_uint64 length;
+        if (sscanf(line, "Q %u %lf %c", &id, &seconds, &extra) != 2 || !isfinite(seconds) || seconds < 0) return -1;
+        if (!v) return 1; /* Natural completion may have won the command race. */
+        if (v->seeking) return -1; /* Controller permits one in-flight seek. */
+        ma_result result = ma_sound_get_data_format(&v->sound, NULL, NULL, &rate, NULL, 0);
+        if (result == MA_SUCCESS) result = ma_sound_get_length_in_pcm_frames(&v->sound, &length);
+        if (result == MA_SUCCESS && rate == 0) result = MA_INVALID_DATA;
+        if (result == MA_SUCCESS) {
+            /* Compare before multiplying/casting: even DBL_MAX safely ends. */
+            if (seconds >= (double)length / rate || ma_sound_at_end(&v->sound)) {
+                finish(v, "ended");
+                return 1;
+            }
+            double frames = seconds * rate;
+            if (frames >= 18446744073709551616.0) result = MA_OUT_OF_RANGE;
+            else result = ma_sound_seek_to_pcm_frame(&v->sound, (ma_uint64)frames);
+        }
+        if (result != MA_SUCCESS) {
+            ma_sound_uninit(&v->sound); v->id = 0; v->seeking = 0;
+            printf("ERROR %u DECODE %d\n", id, result);
+        } else v->seeking = 1;
     } else if (op == 'S') {
         if (sscanf(line, "S %u %c", &id, &extra) != 1) return -1;
         if (v) finish(v, "stopped");
@@ -151,6 +177,28 @@ static int command(ma_engine* engine, char* line)
         if (v) ma_sound_set_volume(&v->sound, volume);
     } else return -1;
     return 1;
+}
+
+static void poll_voices(void)
+{
+    for (int i = 0; i < MAX_VOICES; ++i) {
+        voice* v = &voices[i];
+        if (!v->id) continue;
+        ma_result result = ma_resource_manager_data_source_result(v->sound.pResourceManagerDataSource);
+        if (result != MA_SUCCESS && result != MA_BUSY) {
+            unsigned id = v->id;
+            ma_sound_uninit(&v->sound); v->id = 0; v->seeking = 0;
+            printf("ERROR %u DECODE %d\n", id, result);
+        } else if (ma_sound_at_end(&v->sound)) finish(v, "ended");
+        else if (v->seeking && ma_atomic_load_64(&v->sound.seekTarget) == MA_SEEK_TARGET_NONE &&
+            ma_atomic_load_32(&v->sound.pResourceManagerDataSource->backend.stream.seekCounter) == 0) {
+            /* Pinned miniaudio atomics: the mix thread consumed the target
+               and the job thread finished refilling the stream pages. */
+            if (ma_resource_manager_data_source_result(v->sound.pResourceManagerDataSource) != MA_SUCCESS) continue;
+            v->seeking = 0;
+            printf("SEEKED %u\n", v->id);
+        }
+    }
 }
 
 int main(int argc, char** argv)
@@ -193,7 +241,7 @@ int main(int argc, char** argv)
     config.notificationCallback = notification;
     result = ma_engine_init(&config, &engine);
     if (result != MA_SUCCESS) { printf("FATAL DEVICE %d\n", result); ma_context_uninit(&context); return 1; }
-    printf("READY 1\n");
+    printf("READY 2\n");
     while (running > 0) {
         int have_line;
         ma_mutex_lock(&inbox_lock);
@@ -202,16 +250,7 @@ int main(int argc, char** argv)
         ma_mutex_unlock(&inbox_lock);
         if (have_line) running = command(&engine, line);
         if (atomic_load(&device_lost)) { printf("FATAL DEVICE %d\n", MA_DEVICE_NOT_STARTED); running = -1; }
-        for (int i = 0; i < MAX_VOICES; ++i) {
-            voice* v = &voices[i];
-            if (!v->id) continue;
-            result = ma_resource_manager_data_source_result(v->sound.pResourceManagerDataSource);
-            if (result != MA_SUCCESS && result != MA_BUSY) {
-                unsigned id = v->id;
-                ma_sound_uninit(&v->sound); v->id = 0;
-                printf("ERROR %u DECODE %d\n", id, result);
-            } else if (ma_sound_at_end(&v->sound)) finish(v, "ended");
-        }
+        poll_voices();
         ma_sleep(5);
     }
     for (int i = 0; i < MAX_VOICES; ++i) if (voices[i].id) ma_sound_uninit(&voices[i].sound);

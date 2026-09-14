@@ -78,3 +78,30 @@ test('TypeScript lifecycle integrates with native engine through actual pipes', 
   assert.equal(await c.stop(), 'stopped');
   await player.close();
 });
+
+test('seeking through actual pipes preserves peers, cancellation, and completion', { timeout: 10000 }, async t => {
+  const { path } = await fixture(t, 3);
+  const player = new Controller({}, (event, failed) => new Session(event, failed,
+    [resolve(`.tmp/playsound-test${process.platform === 'win32' ? '.exe' : ''}`), '--null', '--parent', String(process.pid)]));
+  t.after(() => player.close());
+  const a = player.play(path); const b = player.play(path);
+  a.seek(1.25);
+  while (a.state === 'pending' || b.state === 'pending') await turn();
+  for (let i = 0; i < 10000; i++) a.seek(i % 2);
+  a.seek(Number.MAX_VALUE);
+  assert.equal(await a.finished, 'ended');
+  assert.equal(b.state, 'playing');
+  assert.equal(await b.stop(), 'stopped');
+  a.seek(0);
+  const abort = new AbortController();
+  const c = player.play(path, { signal: abort.signal });
+  while (c.state === 'pending') await turn();
+  c.seek(2);
+  abort.abort();
+  assert.equal(await c.finished, 'stopped');
+  const d = player.play(path);
+  while (d.state === 'pending') await turn();
+  d.seek(1);
+  await player.close();
+  assert.equal(await d.finished, 'stopped');
+});

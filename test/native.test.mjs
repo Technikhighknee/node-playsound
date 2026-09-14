@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { resolve, join } from 'node:path';
 import { writeFile, readFile } from 'node:fs/promises';
-import { fixture } from './fixtures.mjs';
+import { fixture, wav } from './fixtures.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { Worker } from 'node:worker_threads';
@@ -19,6 +19,23 @@ test('native: decoded PCM proves volume, mute, gain changes, and additive mixing
   assert.match(stdout, /PCM_OK/);
 });
 
+for (const mode of ['seek', 'fail-seek', 'fail-read', 'unknown-length']) {
+  test(`native: seeking PCM and decoder error propagation (${mode})`, { timeout: 10000 }, async t => {
+    const { path } = await fixture(t, 1);
+    const data = wav(1);
+    data.fill(0, 44, 44 + 48000); // Silence until 0.5 seconds, then tone.
+    await writeFile(path, data);
+    const { stdout } = await promisify(execFile)(resolve(`.tmp/playsound-render-test${process.platform === 'win32' ? '.exe' : ''}`),
+      [Buffer.from(path).toString('hex'), mode], { windowsHide: true });
+    if (mode === 'seek') assert.match(stdout, /SEEK_PCM_OK/);
+    else {
+      assert.match(stdout, /ERROR 1 DECODE -\d+/);
+      assert.doesNotMatch(stdout, /SEEKED 1|DONE 1 ended/);
+      assert.match(stdout, /SEEK_FAILURE_OK/);
+    }
+  });
+}
+
 async function engine(t) {
   const child = spawn(binary, ['--null', '--parent', String(process.pid)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const closed = once(child, 'close');
@@ -27,7 +44,7 @@ async function engine(t) {
   let stderr = '';
   child.stderr.on('data', data => { stderr += data; });
   const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
-  assert.equal((await lines.next()).value, 'READY 1', stderr);
+  assert.equal((await lines.next()).value, 'READY 2', stderr);
   return { child, closed, next: async () => (await lines.next()).value, send: text => child.stdin.write(`${text}\n`) };
 }
 
@@ -47,6 +64,27 @@ for (const format of ['mp3', 'flac']) {
     p.send(`P 1 0 ${Buffer.from(resolve(`test/audio/tone.${format}`)).toString('hex')}`);
     assert.equal(await p.next(), 'STARTED 1');
     assert.equal(await p.next(), 'DONE 1 ended');
+  });
+}
+
+for (const format of ['wav', 'mp3', 'flac']) {
+  test(`native: streamed ${format} seeks forward, backward, and beyond the end`, { timeout: 10000 }, async t => {
+    const { path } = await fixture(t, 2);
+    const source = format === 'wav' ? path : resolve(`test/audio/tone.${format}`);
+    const p = await engine(t);
+    p.send(`P 1 0 ${Buffer.from(source).toString('hex')}`);
+    assert.equal(await p.next(), 'STARTED 1');
+    for (const seconds of [0.05, 0]) {
+      p.send(`Q 1 ${seconds}`);
+      assert.equal(await p.next(), 'SEEKED 1');
+    }
+    p.send('Q 1 1.7976931348623157e+308');
+    assert.equal(await p.next(), 'DONE 1 ended');
+    p.send('Q 1 0'); // Already completed: no resurrection or stale reply.
+    p.send(`P 2 0 ${Buffer.from(path).toString('hex')}`);
+    assert.equal(await p.next(), 'STARTED 2');
+    p.send('S 2');
+    assert.equal(await p.next(), 'DONE 2 stopped');
   });
 }
 
@@ -95,6 +133,14 @@ test('native: malformed commands fail closed', { timeout: 10000 }, async t => {
   p.send('P 1 nan ff');
   assert.equal((await p.closed)[0], 2);
 });
+
+for (const value of ['-1', 'nan', 'inf', '1 trailing']) {
+  test(`native: malformed seek fails closed (${value})`, { timeout: 10000 }, async t => {
+    const p = await engine(t);
+    p.send(`Q 1 ${value}`);
+    assert.equal((await p.closed)[0], 2);
+  });
+}
 
 test('native: losing the parent input terminates active audio', { timeout: 10000 }, async t => {
   const { path } = await fixture(t, 5);

@@ -52,6 +52,8 @@ console.log('Installed ESM package works without runtime dependencies.');
 const playback: Playback = play(new URL('file:///tone.wav'), { volume: 0.5, signal: AbortSignal.abort() });
 const result: Promise<PlaybackResult> = playback.finished;
 playback.volume = 0.2;
+const seekResult: void = playback.seek(80.5);
+void seekResult;
 void playback.stop();
 void result;
 void sound('tone.wav').play();
@@ -61,6 +63,8 @@ void new AudioError('DEVICE_ERROR', 'No device');
 play('tone.wav', { volume: 'loud' });
 // @ts-expect-error state is read-only
 playback.state = 'ended';
+// @ts-expect-error seek takes seconds as a number
+playback.seek('80');
 // @ts-expect-error no implementation-specific options
 new Player({ executable: 'ffplay' });
 `);

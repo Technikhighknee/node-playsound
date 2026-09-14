@@ -5,6 +5,7 @@ import { AudioError } from './errors.js';
 
 export type EngineEvent =
   | { type: 'started'; id: number }
+  | { type: 'seeked'; id: number }
   | { type: 'done'; id: number; reason: 'ended' | 'stopped' }
   | { type: 'error'; id: number; error: AudioError };
 
@@ -12,6 +13,7 @@ export interface Engine {
   play(id: number, path: string, volume: number): void;
   stop(id: number): void;
   volume(id: number, volume: number): void;
+  seek(id: number, seconds: number): void;
   close(): Promise<void>;
   fail(error: AudioError): void;
 }
@@ -82,7 +84,7 @@ export class Session implements Engine {
   }
   stop(id: number): void {
     if (this.#queue.has(`P${id}`)) {
-      for (const key of [`P${id}`, `V${id}`]) {
+      for (const key of [`P${id}`, `V${id}`, `Q${id}`]) {
         this.#bytes -= this.#queue.get(key)?.length ?? 0;
         this.#queue.delete(key);
       }
@@ -90,6 +92,7 @@ export class Session implements Engine {
     } else this.#send(`S${id}`, `S ${id}\n`);
   }
   volume(id: number, volume: number): void { this.#send(`V${id}`, `V ${id} ${volume}\n`); }
+  seek(id: number, seconds: number): void { this.#send(`Q${id}`, `Q ${id} ${seconds}\n`); }
 
   #send(key: string, command: string): void {
     if (this.#closing) return;
@@ -128,7 +131,7 @@ export class Session implements Engine {
   }
 
   #line(line: string): boolean {
-    if (line === 'READY 1' && !this.#ready) {
+    if (line === 'READY 2' && !this.#ready) {
       this.#ready = true;
       clearTimeout(this.#startup);
       this.#flush();
@@ -139,11 +142,12 @@ export class Session implements Engine {
       return true;
     }
     if (!this.#ready) return false;
-    const match = /^(STARTED|DONE|ERROR) ([1-9]\d*)(?: (ended|stopped|FILE|DECODE|DEVICE|LIMIT)(?: (-?\d+))?)?$/.exec(line);
+    const match = /^(STARTED|SEEKED|DONE|ERROR) ([1-9]\d*)(?: (ended|stopped|FILE|DECODE|DEVICE|LIMIT)(?: (-?\d+))?)?$/.exec(line);
     if (!match) return false;
     const id = Number(match[2]);
     if (!Number.isSafeInteger(id) || id > 0xffff_ffff) return false;
     if (match[1] === 'STARTED' && !match[3]) this.#event({ type: 'started', id });
+    else if (match[1] === 'SEEKED' && !match[3]) this.#event({ type: 'seeked', id });
     else if (match[1] === 'DONE' && (match[3] === 'ended' || match[3] === 'stopped') && !match[4])
       this.#event({ type: 'done', id, reason: match[3] });
     else if (match[1] === 'ERROR' && match[4] !== undefined) {

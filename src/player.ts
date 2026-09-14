@@ -28,6 +28,8 @@ export interface Playback extends AsyncDisposable {
   volume: number;
   /** Idempotent. Resolves after playback resources are released. */
   stop(): Promise<PlaybackResult>;
+  /** Request an absolute position in seconds. Failures reject finished. */
+  seek(seconds: number): void;
 }
 export interface Sound {
   /** Each call creates an independent playback, including when calls overlap. */
@@ -64,22 +66,30 @@ class Handle implements Playback {
   #volume: number;
   #stop: () => void;
   #change: (volume: number) => void;
-  constructor(volume: number, stop: () => void, change: (volume: number) => void) {
+  #seek: (seconds: number) => void;
+  constructor(volume: number, stop: () => void, change: (volume: number) => void, seek: (seconds: number) => void) {
     this.#volume = volume;
     this.#stop = stop;
     this.#change = change;
+    this.#seek = seek;
     this.finished = new Promise((resolve, reject) => { this.#resolve = resolve; this.#reject = reject; });
   }
   get state(): PlaybackState { return this.#state; }
   get volume(): number { return this.#volume; }
   set volume(value: number) { this.#volume = gain(value); this.#change(value); }
   stop(): Promise<PlaybackResult> { this.#stop(); return this.finished; }
+  seek(seconds: number): void {
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0)
+      throw new RangeError('Seek position must be a finite, nonnegative number of seconds.');
+    this.#seek(seconds);
+  }
   async [Symbol.asyncDispose](): Promise<void> { await this.stop(); }
   starting(): void { if (this.#state === 'pending') this.#state = 'playing'; }
   stopping(): void { this.#state = 'stopping'; }
   settle(result: PlaybackResult | AudioError): void {
     this.#stop = () => {};
     this.#change = () => {};
+    this.#seek = () => {};
     if (result instanceof AudioError) { this.#state = 'failed'; this.#reject(result); }
     else { this.#state = result; this.#resolve(result); }
   }
@@ -90,6 +100,8 @@ interface Entry {
   path: string;
   handle: Handle;
   sent: boolean;
+  seekTarget: number | undefined;
+  seeking: boolean;
   timer: NodeJS.Timeout | undefined;
   removeAbort: (() => void) | undefined;
 }
@@ -137,8 +149,12 @@ export class Controller {
     while (this.#entries.has(this.#nextId)) this.#nextId = this.#nextId === 0xffff_ffff ? 1 : this.#nextId + 1;
     const handle = new Handle(volume, () => this.#stop(entry), value => {
       if (entry.sent && this.#entries.has(id)) this.#engine?.volume(id, value);
+    }, seconds => {
+      if (this.#closed || !this.#entries.has(id) || handle.state === 'stopping') return;
+      entry.seekTarget = seconds;
+      this.#seek(entry);
     });
-    const entry: Entry = { id, path, handle, sent: false, timer: undefined, removeAbort: undefined };
+    const entry: Entry = { id, path, handle, sent: false, seekTarget: undefined, seeking: false, timer: undefined, removeAbort: undefined };
     if (this.#closed) { handle.settle(new AudioError('PLAYER_CLOSED', 'This player is closed. Create a new Player to play audio.')); return handle; }
     if (signal?.aborted) { handle.settle('stopped'); return handle; }
     if (this.#entries.size >= this.#limit) {
@@ -191,9 +207,26 @@ export class Controller {
     const entry = this.#entries.get(event.id);
     if (!entry) return;
     if (event.type === 'started') {
+      if (entry.handle.state !== 'pending' && entry.handle.state !== 'stopping') return;
       if (entry.handle.state !== 'stopping') { clearTimeout(entry.timer); entry.timer = undefined; }
       entry.handle.starting();
+      this.#seek(entry);
+    } else if (event.type === 'seeked') {
+      if (!entry.seeking || entry.handle.state !== 'playing') return;
+      clearTimeout(entry.timer);
+      entry.timer = undefined;
+      entry.seeking = false;
+      this.#seek(entry);
     } else this.#settle(entry, event.type === 'done' ? event.reason : event.error);
+  }
+
+  #seek(entry: Entry): void {
+    if (entry.handle.state !== 'playing' || entry.seeking || entry.seekTarget === undefined || this.#closed) return;
+    const seconds = entry.seekTarget;
+    entry.seekTarget = undefined;
+    entry.seeking = true;
+    entry.timer = setTimeout(() => this.#timeout(entry, 'Audio seeking did not complete within 10 seconds.'), 10_000);
+    this.#engine?.seek(entry.id, seconds);
   }
 
   #timeout(entry: Entry, message: string): void {
