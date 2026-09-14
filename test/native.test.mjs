@@ -1,14 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, fork } from 'node:child_process';
+import { spawn, fork, execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { resolve, join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { fixture } from './fixtures.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { promisify } from 'node:util';
 
 const binary = resolve(`.tmp/playsound-test${process.platform === 'win32' ? '.exe' : ''}`);
+
+test('native: decoded PCM proves volume, mute, gain changes, and additive mixing', { timeout: 10000 }, async t => {
+  const { path } = await fixture(t, 0.2);
+  const { stdout } = await promisify(execFile)(resolve(`.tmp/playsound-render-test${process.platform === 'win32' ? '.exe' : ''}`),
+    [Buffer.from(path).toString('hex')], { windowsHide: true });
+  assert.match(stdout, /PCM_OK/);
+});
 
 async function engine(t) {
   const child = spawn(binary, ['--null', '--parent', String(process.pid)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
