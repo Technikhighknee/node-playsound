@@ -52,6 +52,15 @@ test('unresponsive startup is bounded', { timeout: 5000 }, async t => {
   await engine.close();
 });
 
+test('stop cancels buffered playback without waiting for engine readiness', { timeout: 5000 }, async t => {
+  const { engine, events } = session(t, 'hang');
+  engine.play(1, 'unused', 1);
+  engine.volume(1, 0.2);
+  engine.stop(1);
+  assert.deepEqual(events, [{ type: 'done', id: 1, reason: 'stopped' }]);
+  await engine.close();
+});
+
 test('platform selection rejects unsupported architectures explicitly', () => {
   assert.throws(() => executable('freebsd', 'x64'), { code: 'UNSUPPORTED_PLATFORM' });
   assert.match(executable('darwin', 'arm64'), /darwin-arm64/);

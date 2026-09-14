@@ -80,7 +80,15 @@ export class Session implements Engine {
   play(id: number, path: string, volume: number): void {
     this.#send(`P${id}`, `P ${id} ${volume} ${Buffer.from(path).toString('hex')}\n`);
   }
-  stop(id: number): void { this.#send(`S${id}`, `S ${id}\n`); }
+  stop(id: number): void {
+    if (this.#queue.has(`P${id}`)) {
+      for (const key of [`P${id}`, `V${id}`]) {
+        this.#bytes -= this.#queue.get(key)?.length ?? 0;
+        this.#queue.delete(key);
+      }
+      this.#event({ type: 'done', id, reason: 'stopped' });
+    } else this.#send(`S${id}`, `S ${id}\n`);
+  }
   volume(id: number, volume: number): void { this.#send(`V${id}`, `V ${id} ${volume}\n`); }
 
   #send(key: string, command: string): void {

@@ -162,6 +162,11 @@ export class Controller {
       const info = await stat(entry.path);
       if (this.#closed || !this.#entries.has(entry.id)) return;
       if (!info.isFile()) throw new AudioError('FILE_ERROR', 'Audio source must be a regular file.');
+    } catch (cause) {
+      this.#settle(entry, cause instanceof AudioError ? cause : new AudioError('FILE_ERROR', 'Could not open the audio file.', { cause }));
+      return;
+    }
+    try {
       if (!this.#engine) {
         const engine = this.#factory(event => this.#event(event), error => {
           if (this.#engine !== engine) return;
@@ -174,7 +179,7 @@ export class Controller {
       entry.sent = true;
       this.#engine.play(entry.id, entry.path, entry.handle.volume);
     } catch (cause) {
-      this.#settle(entry, cause instanceof AudioError ? cause : new AudioError('FILE_ERROR', 'Could not open the audio file.', { cause }));
+      this.#settle(entry, cause instanceof AudioError ? cause : new AudioError('ENGINE_ERROR', 'Could not initialize the audio engine.', { cause }));
     }
   }
 

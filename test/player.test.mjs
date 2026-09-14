@@ -187,6 +187,13 @@ test('close prevents in-flight validation from resurrecting an engine', async t 
   await assert.rejects(player.play(path).finished, { code: 'PLAYER_CLOSED' });
 });
 
+test('synchronous initialization failures are engine errors rather than file errors', async t => {
+  const { path } = await fixture(t);
+  const player = new Controller({}, () => { throw new Error('spawn failed'); });
+  t.after(() => player.close());
+  await assert.rejects(player.play(path).finished, { code: 'ENGINE_ERROR' });
+});
+
 test('close waits for native resources before resolving pending completion', async t => {
   const { path } = await fixture(t);
   const { player, started } = setup(t);
