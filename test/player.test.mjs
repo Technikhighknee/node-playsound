@@ -42,7 +42,8 @@ test('invalid arguments fail synchronously without creating an engine', t => {
     assert.throws(() => player.play('a', { volume }), RangeError);
   assert.throws(() => player.play('a', { signal: {} }), TypeError);
   assert.throws(() => player.play('a', null), TypeError);
-  for (const maxConcurrent of [0, 257, 1.5, '2']) assert.throws(() => new Player({ maxConcurrent }), RangeError);
+  for (const maxConcurrent of [0, 257, 1.5, '2', null]) assert.throws(() => new Player({ maxConcurrent }), RangeError);
+  assert.throws(() => player.sound('a').play({ volume: null }), RangeError);
   assert.equal(engines.length, 0);
 });
 
@@ -92,6 +93,13 @@ test('stop before file validation completes starts no resources', async t => {
   await turn();
   assert.equal(engines.length, 0);
   assert.equal(await p.stop(), 'stopped');
+});
+
+test('many immediately cancelled calls do not accumulate engine work', async t => {
+  const { player, engines } = setup(t);
+  const completions = Array.from({ length: 1000 }, () => player.play('unused.wav').stop());
+  assert.ok((await Promise.all(completions)).every(result => result === 'stopped'));
+  assert.equal(engines.length, 0);
 });
 
 test('stop after dispatch waits for acknowledgment, remains idempotent across STARTED', async t => {

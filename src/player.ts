@@ -108,7 +108,7 @@ export class Controller {
 
   constructor(options: PlayerOptions = {}, factory: EngineFactory = (event, failed) => new Session(event, failed)) {
     object(options, 'Player options');
-    const limit = options.maxConcurrent ?? 64;
+    const limit = options.maxConcurrent === undefined ? 64 : options.maxConcurrent;
     if (!Number.isInteger(limit) || limit < 1 || limit > 256)
       throw new RangeError('maxConcurrent must be an integer between 1 and 256.');
     this.#limit = limit;
@@ -121,7 +121,7 @@ export class Controller {
     const volume = gain(options.volume);
     return Object.freeze({ play: (options: PlayOptions = {}) => {
       object(options, 'Play options');
-      return this.play(path, { ...options, volume: options.volume ?? volume });
+      return this.play(path, { ...options, volume: options.volume === undefined ? volume : options.volume });
     } });
   }
 
