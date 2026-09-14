@@ -50,7 +50,7 @@ export class Session implements Engine {
   #failure: (error: AudioError) => void;
 
   constructor(event: (event: EngineEvent) => void, failed: (error: AudioError) => void,
-    command: readonly [string, ...string[]] = [executable()]) {
+    command: readonly [string, ...string[]] = [executable(), '--parent', String(process.pid)]) {
     this.#event = event;
     this.#failure = failed;
     this.#child = spawn(command[0], command.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });

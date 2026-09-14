@@ -20,6 +20,26 @@ static ma_mutex inbox_lock;
 static ma_event consumed;
 static int pending;
 static atomic_int device_lost;
+static unsigned long parent_pid;
+#ifdef _WIN32
+static HANDLE parent_handle;
+#endif
+
+/* EOF alone is insufficient: the reader can be backpressured while a decoder
+   is blocked. Monitor the actual parent independently of the command channel. */
+static ma_thread_result MA_THREADCALL watch_parent(void* unused)
+{
+    (void)unused;
+    for (;;) {
+#ifdef _WIN32
+        if (WaitForSingleObject(parent_handle, 100) != WAIT_TIMEOUT) _Exit(0);
+#else
+        if ((unsigned long)getppid() != parent_pid) _Exit(0);
+        ma_sleep(100);
+#endif
+    }
+    return 0;
+}
 
 /* A single bounded mailbox applies backpressure all the way to Node. Only the
    main thread touches voices. EOF must also terminate a stuck decoder/device. */
@@ -123,20 +143,34 @@ int main(int argc, char** argv)
     ma_engine engine;
     ma_context context;
     ma_thread reader;
+    ma_thread watcher;
     ma_engine_config config = ma_engine_config_init();
     ma_result result;
     char line[MAX_LINE];
     int running = 1;
     setvbuf(stdout, NULL, _IONBF, 0);
+    int parent_index = 1;
+#ifdef PLAYSOUND_TEST
+    if (argc != 4 || strcmp(argv[1], "--null")) return 2;
+    parent_index = 2;
+#else
+    if (argc != 3) return 2;
+#endif
+    if (strcmp(argv[parent_index], "--parent")) return 2;
+    char* end;
+    parent_pid = strtoul(argv[parent_index + 1], &end, 10);
+    if (!parent_pid || *end || parent_pid > 0xffffffffUL) return 2;
+#ifdef _WIN32
+    parent_handle = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)parent_pid);
+    if (!parent_handle) return 2;
+#endif
     if (ma_mutex_init(&inbox_lock) != MA_SUCCESS || ma_event_init(&consumed) != MA_SUCCESS) return 2;
+    if (ma_thread_create(&watcher, ma_thread_priority_normal, 0, watch_parent, NULL, NULL) != MA_SUCCESS) return 2;
     if (ma_thread_create(&reader, ma_thread_priority_normal, 0, read_commands, NULL, NULL) != MA_SUCCESS) return 2;
 #ifdef PLAYSOUND_TEST
     ma_backend backend = ma_backend_null;
-    if (argc != 2 || strcmp(argv[1], "--null")) return 2;
     result = ma_context_init(&backend, 1, NULL, &context);
 #else
-    (void)argv;
-    if (argc != 1) return 2;
     result = ma_context_init(NULL, 0, NULL, &context);
 #endif
     if (result != MA_SUCCESS) { printf("FATAL DEVICE %d\n", result); return 1; }

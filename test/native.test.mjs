@@ -1,16 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, fork } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { resolve, join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { fixture } from './fixtures.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const binary = resolve(`.tmp/playsound-test${process.platform === 'win32' ? '.exe' : ''}`);
 
 async function engine(t) {
-  const child = spawn(binary, ['--null'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(binary, ['--null', '--parent', String(process.pid)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const closed = once(child, 'close');
   t.after(async () => { child.stdin.end(); await closed; });
   child.stdin.on('error', () => {});
@@ -60,4 +61,23 @@ test('native: losing the parent input terminates active audio', { timeout: 10000
   assert.equal(await p.next(), 'STARTED 1');
   p.child.stdin.end();
   assert.equal((await p.closed)[0], 0);
+});
+
+test('native: abrupt parent death leaves no engine process', { timeout: 10000 }, async t => {
+  const parent = fork(resolve('test/parent-fixture.mjs'), [binary], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  t.after(() => parent.kill('SIGKILL'));
+  const [{ pid }] = await once(parent, 'message');
+  const closed = once(parent, 'close');
+  parent.kill('SIGKILL');
+  await closed;
+  for (let i = 0; i < 50; i++) {
+    try { process.kill(pid, 0); } catch (error) {
+      if (error.code === 'ESRCH') return;
+      throw error;
+    }
+    await delay(20);
+  }
+  // Clean up only the exact child created by this test if the assertion fails.
+  process.kill(pid, 'SIGKILL');
+  assert.fail('native child survived its parent');
 });
