@@ -5,7 +5,7 @@ package or a claim of completed hardware validation on all six targets.
 
 | Check | Evidence |
 | --- | --- |
-| Windows x64, Node 24.14.0 | Strict typecheck, build, and 39 tests pass |
+| Windows x64, Node 24.14.0 | Strict typecheck, build, and 40 tests pass |
 | Linux x64, Node 22.22.1 | All 39 tests pass under Ubuntu 22.04 userspace on WSL |
 | Real Windows output | MP3 and WAV device initialization/playback reach completion |
 | Installed ESM consumer | Tarball installed with scripts disabled and no runtime dependencies |
@@ -13,6 +13,10 @@ package or a claim of completed hardware validation on all six targets.
 | Installed TypeScript consumer | Public imports and compile-time misuse checks pass |
 | Native builds | Windows, Linux, macOS; x64 and ARM64 all compile |
 | Archive | Source/binary hashes, target machine types, allowed files, and executable modes checked |
+
+Windows validation also exercises two full batches of 256 simultaneous native
+voices, capacity overflow, and successful playback after releasing all slots.
+That additional stress test awaits execution on the other targets.
 
 Forced worker termination ends native execution, including a blocked decoder.
 On Linux, the exited process can remain a zombie under the surviving Node
