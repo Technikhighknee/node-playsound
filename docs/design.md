@@ -103,8 +103,8 @@ on upgrades. Serial dispatch prevents that version's load/store handling of
 the target from losing a newer request. No Node callback runs on an audio thread.
 
 Three documented vendor fixes surface seek submission, decoder seek, and
-refill errors through the existing stream status. Their failure paths have
-direct native tests. A decoder failure destroys only that voice; a timeout
+refill errors through the existing stream status. Decoder seek and refill
+failures have direct native tests. A decoder failure destroys only that voice; a timeout
 retires the entire isolated helper as before. The cursor API reports requested
 positions before asynchronous decoding completes, and duration can be unknown;
 neither is exposed as misleading synchronous playback metadata.

@@ -184,12 +184,15 @@ static void poll_voices(void)
     for (int i = 0; i < MAX_VOICES; ++i) {
         voice* v = &voices[i];
         if (!v->id) continue;
+        /* Sample end first: a refill failure is published before the audio
+           thread marks the sound ended, and must not become a successful end. */
+        ma_bool32 ended = ma_sound_at_end(&v->sound);
         ma_result result = ma_resource_manager_data_source_result(v->sound.pResourceManagerDataSource);
         if (result != MA_SUCCESS && result != MA_BUSY) {
             unsigned id = v->id;
             ma_sound_uninit(&v->sound); v->id = 0; v->seeking = 0;
             printf("ERROR %u DECODE %d\n", id, result);
-        } else if (ma_sound_at_end(&v->sound)) finish(v, "ended");
+        } else if (ended) finish(v, "ended");
         else if (v->seeking && ma_atomic_load_64(&v->sound.seekTarget) == MA_SEEK_TARGET_NONE &&
             ma_atomic_load_32(&v->sound.pResourceManagerDataSource->backend.stream.seekCounter) == 0) {
             /* Pinned miniaudio atomics: the mix thread consumed the target
