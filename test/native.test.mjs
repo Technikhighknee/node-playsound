@@ -4,7 +4,7 @@ import { spawn, fork, execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { resolve, join } from 'node:path';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
 import { fixture } from './fixtures.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -101,7 +101,7 @@ test('native: abrupt parent death leaves no engine process', { timeout: 10000 },
 });
 
 for (const block of [false, true]) {
-  test(`native: terminating a Node worker releases its ${block ? 'blocked' : 'idle'} engine`, { timeout: 15000 }, async t => {
+  test(`native: forced worker termination ends ${block ? 'blocked' : 'idle'} engine execution`, { timeout: 15000 }, async t => {
     const worker = new Worker(new URL('./worker-fixture.mjs', import.meta.url), { workerData: { binary, block } });
     t.after(() => worker.terminate());
     const [{ pid }] = await once(worker, 'message');
@@ -111,9 +111,38 @@ for (const block of [false, true]) {
         if (error.code === 'ESRCH') return;
         throw error;
       }
+      // libuv in a forcibly terminated worker cannot reap its POSIX child.
+      // A zombie has exited and released its audio/file/thread resources;
+      // the Node parent retains the process record until it exits itself.
+      if (process.platform === 'linux') {
+        const status = await readFile(`/proc/${pid}/stat`, 'utf8').catch(error => {
+          if (error.code === 'ENOENT') return '';
+          throw error;
+        });
+        if (!status || status.slice(status.lastIndexOf(')') + 2).startsWith('Z')) return;
+      } else if (process.platform === 'darwin') {
+        const result = await promisify(execFile)('/bin/ps', ['-o', 'stat=', '-p', String(pid)]).catch(error => {
+          if (error.code === 1 && !error.stdout?.trim()) return { stdout: '' };
+          throw error;
+        });
+        if (!result.stdout.trim() || result.stdout.trim().startsWith('Z')) return;
+      }
       await delay(100);
     }
+    const status = process.platform === 'linux' ? await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => 'unavailable') : 'unavailable';
     process.kill(pid, 'SIGKILL');
-    assert.fail('native child survived its worker');
+    assert.fail(`native child survived its worker: ${status}`);
   });
 }
+
+test('native: cooperative worker shutdown also reaps the engine process', { timeout: 5000 }, async t => {
+  const worker = new Worker(new URL('./worker-fixture.mjs', import.meta.url), { workerData: { binary, block: false } });
+  t.after(() => worker.terminate());
+  const [{ pid }] = await once(worker, 'message');
+  const exited = once(worker, 'exit');
+  const closed = once(worker, 'message');
+  worker.postMessage('close');
+  assert.deepEqual(await closed, ['closed']);
+  assert.equal((await exited)[0], 0);
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+});

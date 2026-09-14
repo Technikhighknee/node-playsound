@@ -32,7 +32,7 @@ indefinitely.
 Only the native main thread initializes, starts, changes, and destroys voices.
 An input thread feeds a single bounded mailbox. The engine's audio thread
 does mixing; it never emits IPC or frees a sound from an end callback.
-The main loop polls completion every 5 ms and destroys a voice before sending
+The main loop polls completion with a 5 ms sleep and destroys a voice before sending
 its completion. Decoder status is checked separately from end-of-stream.
 
 Node owns a bounded set of playback entries. Entry removal is the single
@@ -57,6 +57,11 @@ exit relies on OS reclamation of file descriptors, threads, and device handles.
 Explicit `close()` is still the deterministic ownership mechanism.
 Native mailbox backpressure also has a ten-second limit, so a terminated Node
 worker cannot strand a blocked engine indefinitely while its parent stays alive.
+On POSIX, libuv in a forcibly terminated worker cannot reap an exited child;
+the main Node process may retain its zombie process record. The native process
+has released its resources, but cooperative `Player.close()` before worker
+termination is required to reclaim the PID promptly as well. Tests distinguish
+native execution ending from the process record being reaped.
 
 The normal device backend must succeed. The silent/null backend is compiled
 out of production. Tests build a separate executable with that backend and

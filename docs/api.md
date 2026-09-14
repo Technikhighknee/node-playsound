@@ -85,8 +85,12 @@ forcefully terminated. Parent death also terminates the engine independently
 of the command pipe. No process-wide signal handlers are installed.
 
 For service shutdown, keep an application-owned `Player` and call `close()`
-from your existing shutdown procedure. With worker threads, each worker has
-its own shared player; pipe closure cleans up its engine when the worker exits.
+from your existing shutdown procedure. With worker threads, use an explicit
+`Player` and await `close()` inside the worker before terminating it. Forced
+worker termination still stops native execution (within ten seconds if the
+decoder is blocked), but on POSIX Node can retain the exited child's process
+record until the main process exits. Cooperative shutdown avoids that zombie
+process record. Each worker otherwise has its own shared player.
 
 ## Errors
 

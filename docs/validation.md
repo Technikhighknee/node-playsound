@@ -5,13 +5,19 @@ package or a claim of completed hardware validation on all six targets.
 
 | Check | Evidence |
 | --- | --- |
-| Windows x64, Node 24.14.0 | Strict typecheck, build, and 38 tests pass |
-| Linux x64, Node 22.22.1 | Native decoding, PCM mixing, lifecycle, and pipe tests run under Ubuntu 22.04 userspace on WSL |
+| Windows x64, Node 24.14.0 | Strict typecheck, build, and 39 tests pass |
+| Linux x64, Node 22.22.1 | All 39 tests pass under Ubuntu 22.04 userspace on WSL |
 | Real Windows output | MP3 and WAV device initialization/playback reach completion |
 | Installed ESM consumer | Tarball installed with scripts disabled and no runtime dependencies |
+| Windows-built archive on Linux | Installation preserves executable permissions; missing audio reports `DEVICE_ERROR` |
 | Installed TypeScript consumer | Public imports and compile-time misuse checks pass |
 | Native builds | Windows, Linux, macOS; x64 and ARM64 all compile |
 | Archive | Source/binary hashes, target machine types, allowed files, and executable modes checked |
+
+Forced worker termination ends native execution, including a blocked decoder.
+On Linux, the exited process can remain a zombie under the surviving Node
+parent. Cooperative worker shutdown is separately tested to reap it; see
+[the lifecycle contract](api.md#shutdown).
 
 Local native builds use Zig 0.14.1. macOS builds were cross-compiled with the
 macOS 13.3 SDK; they have not been executed on a Mac. The SDK and compiler

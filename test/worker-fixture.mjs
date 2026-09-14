@@ -7,4 +7,11 @@ createInterface({ input: child.stdout }).on('line', line => {
   if ((line === 'READY 1' && !workerData.block) || line === 'BLOCKED')
     setTimeout(() => parentPort.postMessage({ pid: child.pid }), 50);
 });
-parentPort.on('message', () => {});
+parentPort.on('message', message => {
+  if (message !== 'close') return;
+  child.once('close', () => {
+    parentPort.postMessage('closed');
+    parentPort.close();
+  });
+  child.stdin.end();
+});
