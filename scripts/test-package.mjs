@@ -21,7 +21,7 @@ if (!npm) throw new Error('Run through npm: npm run test:package [-- --local]');
 try {
   const packed = packArchive(temporary);
   const names = packed.files.map(file => file.path);
-  const allowed = /^(?:package\.json|README\.md|LICENSE|THIRD_PARTY_NOTICES\.md|dist\/[a-z]+\.(?:js|d\.ts)|bin\/(?:win32|darwin|linux)-(?:x64|arm64)\/(?:playsound(?:\.exe)?|manifest\.json))$/;
+  const allowed = /^(?:package\.json|README\.md|LICENSE|THIRD_PARTY_NOTICES\.md|docs\/[a-z]+\.md|examples\/[a-z]+\.mjs|dist\/[a-z]+\.(?:js|d\.ts)|bin\/(?:win32|darwin|linux)-(?:x64|arm64)\/(?:playsound(?:\.exe)?|manifest\.json))$/;
   for (const name of names) if (!allowed.test(name)) throw new Error(`Unexpected package file: ${name}`);
   for (const file of packed.files) if (/^bin\/[^/]+\/playsound(?:\.exe)?$/.test(file.path) && file.mode !== 0o755)
     throw new Error(`Native executable has incorrect archive permissions: ${file.path}`);

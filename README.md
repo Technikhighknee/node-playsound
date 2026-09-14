@@ -83,5 +83,8 @@ the operating system's output buffer. This is not a sample-accurate scheduler.
 [API and errors](docs/api.md) · [Design and lifecycle](docs/design.md) ·
 [Development and release](docs/development.md) · [Examples](examples/)
 
+See [recorded validation](docs/validation.md) for tested environments and the
+remaining release checks.
+
 CC0-1.0. Bundled miniaudio uses its public-domain option; see
 [third-party notices](THIRD_PARTY_NOTICES.md).

@@ -7,7 +7,7 @@
   "engines": { "node": ">=22" },
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "types": "./dist/index.d.ts",
-  "files": ["dist", "bin/*/playsound", "bin/*/playsound.exe", "bin/*/manifest.json", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "files": ["dist", "bin/*/playsound", "bin/*/playsound.exe", "bin/*/manifest.json", "docs", "examples", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "sideEffects": false,
   "keywords": ["audio", "sound", "play", "mp3", "wav", "flac", "typescript"],
   "scripts": {
