@@ -83,11 +83,14 @@ export class Session implements Engine {
     this.#send(`P${id}`, `P ${id} ${volume} ${Buffer.from(path).toString('hex')}\n`);
   }
   stop(id: number): void {
-    if (this.#queue.has(`P${id}`)) {
-      for (const key of [`P${id}`, `V${id}`, `Q${id}`]) {
-        this.#bytes -= this.#queue.get(key)?.length ?? 0;
-        this.#queue.delete(key);
-      }
+    const queuedPlay = this.#queue.has(`P${id}`);
+    // Cancel commands we still own, even when play has already entered the
+    // pipe. Bytes accepted by stdin.write() cannot be recalled or reordered.
+    for (const key of [`P${id}`, `V${id}`, `Q${id}`]) {
+      this.#bytes -= this.#queue.get(key)?.length ?? 0;
+      this.#queue.delete(key);
+    }
+    if (queuedPlay) {
       this.#event({ type: 'done', id, reason: 'stopped' });
     } else this.#send(`S${id}`, `S ${id}\n`);
   }

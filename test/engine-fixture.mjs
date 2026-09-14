@@ -15,6 +15,12 @@ reader.on('close', () => { clearInterval(keepalive); });
 reader.on('line', line => {
   const [op, id] = line.split(' ');
   if (op === 'QUIT') process.exit(0);
+  if (mode === 'backpressure') {
+    if (op === 'P') process.stdout.write(`STARTED ${id}\n`);
+    if (op === 'Q') process.stdout.write(`SEEKED ${id}\n`);
+    if (op === 'S') process.stdout.write(`DONE ${id} stopped\n`);
+    return;
+  }
   if (op === 'P') {
     if (mode === 'crash') process.exit(23);
     if (mode === 'duplicate') process.stdout.write('READY 2\n');

@@ -66,6 +66,24 @@ test('platform selection rejects unsupported architectures explicitly', () => {
   assert.match(executable('darwin', 'arm64'), /darwin-arm64/);
 });
 
+test('stop removes an unwritten seek after play was written under real pipe backpressure', { timeout: 5000 }, async t => {
+  const { engine, events } = session(t, 'backpressure');
+  engine.play(1, 'first.wav', 1);
+  while (!events.some(e => e.type === 'started' && e.id === 1)) await turn();
+  // One maximum-size path exceeds the pipe Writable high-water mark. The
+  // following synchronous calls run before the drain event can flush the queue.
+  engine.play(2, 'x'.repeat(65536), 1);
+  engine.seek(1, 80);
+  engine.volume(1, 0.5);
+  engine.seek(2, 10);
+  engine.stop(1);
+  while (!events.some(e => e.type === 'done' && e.id === 1)) await turn();
+  assert.ok(!events.some(e => e.type === 'seeked' && e.id === 1), 'stopped voice must not execute its queued seek');
+  assert.ok(events.some(e => e.type === 'seeked' && e.id === 2), 'peer seek must survive');
+  engine.stop(2);
+  while (!events.some(e => e.type === 'done' && e.id === 2)) await turn();
+});
+
 test('TypeScript lifecycle integrates with native engine through actual pipes', { timeout: 10000 }, async t => {
   const { path } = await fixture(t, 0.2);
   const player = new Controller({}, (event, failed) => new Session(event, failed,
