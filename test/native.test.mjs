@@ -40,6 +40,15 @@ test('native: concurrent Unicode-path playback completes independently', { timeo
   assert.deepEqual(lines.sort(), ['STARTED 1', 'STARTED 2', 'DONE 1 ended', 'DONE 2 ended'].sort());
 });
 
+for (const format of ['mp3', 'flac']) {
+  test(`native: bundled ${format} decoder reaches completion`, { timeout: 10000 }, async t => {
+    const p = await engine(t);
+    p.send(`P 1 0 ${Buffer.from(resolve(`test/audio/tone.${format}`)).toString('hex')}`);
+    assert.equal(await p.next(), 'STARTED 1');
+    assert.equal(await p.next(), 'DONE 1 ended');
+  });
+}
+
 test('native: stop, volume, repeat, and a bad file do not poison the engine', { timeout: 10000 }, async t => {
   const { path, directory } = await fixture(t, 1);
   const broken = join(directory, 'broken.mp3');
