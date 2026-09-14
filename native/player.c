@@ -17,7 +17,6 @@ typedef struct { unsigned id; ma_sound sound; } voice;
 static voice voices[MAX_VOICES];
 static char mailbox[MAX_LINE];
 static ma_mutex inbox_lock;
-static ma_event consumed;
 static int pending;
 static atomic_int device_lost;
 static unsigned long parent_pid;
@@ -54,7 +53,19 @@ static ma_thread_result MA_THREADCALL read_commands(void* unused)
         memcpy(mailbox, line, n + 1);
         pending = 1;
         ma_mutex_unlock(&inbox_lock);
-        ma_event_wait(&consumed);
+        /* Bound time spent backpressured too: a terminated Node worker can
+           close this pipe while its parent process stays alive. */
+        ma_timer wait_timer;
+        ma_timer_init(&wait_timer);
+        for (;;) {
+            int occupied;
+            ma_mutex_lock(&inbox_lock);
+            occupied = pending;
+            ma_mutex_unlock(&inbox_lock);
+            if (!occupied) break;
+            if (ma_timer_get_time_in_seconds(&wait_timer) >= 10.0) _Exit(3);
+            ma_sleep(5);
+        }
     }
     _Exit(0);
     return 0;
@@ -91,6 +102,10 @@ static int unhex(char* dest, const char* src)
 
 static int command(ma_engine* engine, char* line)
 {
+#ifdef PLAYSOUND_TEST
+    /* Simulate a stuck third-party decoder for worker-termination tests. */
+    if (!strcmp(line, "BLOCK\n")) { puts("BLOCKED"); ma_sleep(60000); return 1; }
+#endif
     char op, extra;
     unsigned id;
     float volume;
@@ -164,7 +179,7 @@ int main(int argc, char** argv)
     parent_handle = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)parent_pid);
     if (!parent_handle) return 2;
 #endif
-    if (ma_mutex_init(&inbox_lock) != MA_SUCCESS || ma_event_init(&consumed) != MA_SUCCESS) return 2;
+    if (ma_mutex_init(&inbox_lock) != MA_SUCCESS) return 2;
     if (ma_thread_create(&watcher, ma_thread_priority_normal, 0, watch_parent, NULL, NULL) != MA_SUCCESS) return 2;
     if (ma_thread_create(&reader, ma_thread_priority_normal, 0, read_commands, NULL, NULL) != MA_SUCCESS) return 2;
 #ifdef PLAYSOUND_TEST
@@ -185,7 +200,7 @@ int main(int argc, char** argv)
         have_line = pending;
         if (pending) { memcpy(line, mailbox, strlen(mailbox) + 1); pending = 0; }
         ma_mutex_unlock(&inbox_lock);
-        if (have_line) { ma_event_signal(&consumed); running = command(&engine, line); }
+        if (have_line) running = command(&engine, line);
         if (atomic_load(&device_lost)) { printf("FATAL DEVICE %d\n", MA_DEVICE_NOT_STARTED); running = -1; }
         for (int i = 0; i < MAX_VOICES; ++i) {
             voice* v = &voices[i];

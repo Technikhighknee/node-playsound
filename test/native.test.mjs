@@ -8,6 +8,7 @@ import { writeFile } from 'node:fs/promises';
 import { fixture } from './fixtures.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { Worker } from 'node:worker_threads';
 
 const binary = resolve(`.tmp/playsound-test${process.platform === 'win32' ? '.exe' : ''}`);
 
@@ -98,3 +99,21 @@ test('native: abrupt parent death leaves no engine process', { timeout: 10000 },
   process.kill(pid, 'SIGKILL');
   assert.fail('native child survived its parent');
 });
+
+for (const block of [false, true]) {
+  test(`native: terminating a Node worker releases its ${block ? 'blocked' : 'idle'} engine`, { timeout: 15000 }, async t => {
+    const worker = new Worker(new URL('./worker-fixture.mjs', import.meta.url), { workerData: { binary, block } });
+    t.after(() => worker.terminate());
+    const [{ pid }] = await once(worker, 'message');
+    await worker.terminate();
+    for (let i = 0; i < 120; i++) {
+      try { process.kill(pid, 0); } catch (error) {
+        if (error.code === 'ESRCH') return;
+        throw error;
+      }
+      await delay(100);
+    }
+    process.kill(pid, 'SIGKILL');
+    assert.fail('native child survived its worker');
+  });
+}

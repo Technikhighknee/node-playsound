@@ -55,6 +55,8 @@ process even if input is backpressured and file/device initialization blocks.
 The watchdog uses a Windows process handle or the POSIX parent PID. An abrupt
 exit relies on OS reclamation of file descriptors, threads, and device handles.
 Explicit `close()` is still the deterministic ownership mechanism.
+Native mailbox backpressure also has a ten-second limit, so a terminated Node
+worker cannot strand a blocked engine indefinitely while its parent stays alive.
 
 The normal device backend must succeed. The silent/null backend is compiled
 out of production. Tests build a separate executable with that backend and
