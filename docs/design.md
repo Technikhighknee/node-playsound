@@ -75,10 +75,39 @@ speaker. Volume is linear gain; mixing multiple full-volume files can clip.
 Use lower gains when layering loud recordings. Device changes may fail active
 plays rather than transparently migrating them.
 
-There is no pause, seek, network streaming, device selector, effects graph,
+There is no pause, network streaming, device selector, effects graph,
 global volume, or scheduling API. Additions should justify their lifecycle
 and portability costs. Codec support is explicit rather than delegated to
 whatever software happens to be installed.
+
+## Seeking
+
+`Playback.seek(seconds)` follows volume's command/error model: no extra
+promise or public event stream. The controller keeps one in-flight seek and
+one latest pending target per voice. It dispatches after `STARTED`, bounds
+each operation to ten seconds, and ignores late acknowledgments during stop
+or close. The existing completion gate handles natural-end and failure races.
+
+Protocol 2 adds `Q id seconds` and `SEEKED id`. Older helpers fail the startup
+handshake instead of silently ignoring a new command. The native main thread
+converts seconds using the source sample rate, checks the cached length, and
+ends beyond-end requests before any unsafe floating-point-to-integer cast.
+Unknown lengths fail explicitly instead of guessing a boundary.
+
+The sound API atomically publishes the target to miniaudio's mixing thread,
+which posts the streamed seek to its decoder job thread. Acknowledgment waits
+for both the sound's pending target and the stream's seek counter to clear;
+it is not emitted just because the public C seek function returned. This uses
+two internal atomic fields of the pinned vendor version and must be reviewed
+on upgrades. Serial dispatch prevents that version's load/store handling of
+the target from losing a newer request. No Node callback runs on an audio thread.
+
+Three documented vendor fixes surface seek submission, decoder seek, and
+refill errors through the existing stream status. Their failure paths have
+direct native tests. A decoder failure destroys only that voice; a timeout
+retires the entire isolated helper as before. The cursor API reports requested
+positions before asynchronous decoding completes, and duration can be unknown;
+neither is exposed as misleading synchronous playback metadata.
 
 ## Evidence
 

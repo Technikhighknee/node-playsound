@@ -23,6 +23,7 @@ await play('./sound.mp3').finished;
 ```ts
 const playback = play('./music.flac', { volume: 0.5 });
 playback.volume = 0.2;
+playback.seek(80); // Absolute seconds; seeking errors reject finished.
 await playback.stop();
 // finished resolves to 'ended' or 'stopped'.
 ```
@@ -79,6 +80,8 @@ and defaults; subsequent plays reopen the file.
 Volume is linear, from `0` to `1`, and affects only that playback. Completion
 means the engine consumed the sound; a small amount of audio can remain in
 the operating system's output buffer. This is not a sample-accurate scheduler.
+`playback.seek(seconds)` moves that playhead asynchronously; see the
+[seeking contract](docs/api.md#seeking) for pending requests and end-of-file behavior.
 
 [API and errors](docs/api.md) · [Design and lifecycle](docs/design.md) ·
 [Development and release](docs/development.md) · [Examples](examples/)
