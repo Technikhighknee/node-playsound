@@ -1,0 +1,112 @@
+# API
+
+```ts
+play(file: string | URL, options?: PlayOptions): Playback
+sound(file: string | URL, options?: SoundOptions): Sound
+new Player(options?: PlayerOptions)
+```
+
+`play` and `sound` use a shared, lazily opened player. A `Player` provides
+the same `play` and `sound` methods, plus `close(): Promise<void>` and
+`[Symbol.asyncDispose]()`. Construction and import perform no I/O.
+
+Paths resolve against `process.cwd()` when `play()` or `sound()` is called.
+A `Sound` retains that absolute path even if the working directory changes.
+A URL must use `file:`. No shell parses filenames; spaces, quotes, Unicode,
+and newlines are encoded safely. Windows uses wide-character file APIs.
+Symbolic links to regular files are allowed. Do not modify files during playback.
+
+## Options
+
+| Option | Applies to | Default | Meaning |
+| --- | --- | --- | --- |
+| `volume` | `play`, `sound` | `1` | Finite linear gain between 0 and 1 |
+| `signal` | `play` | none | AbortSignal; abortion stops this play |
+| `maxConcurrent` | `Player` | `64` | Integer 1–256; includes pending playback |
+
+`sound(file, options).play(options)` takes the same playback options as
+`play`. Per-play volume overrides the captured default. A sound is immutable
+configuration, with no open file or device to dispose. Repeated calls share
+the player's mixer, not the playhead. Each play can be stopped independently.
+There is no implicit queue when the concurrency limit is reached.
+
+## Playback
+
+| Member | Contract |
+| --- | --- |
+| `finished` | `Promise<'ended' \| 'stopped'>`; rejects with `AudioError` on failure |
+| `state` | Read-only: `pending`, `playing`, `stopping`, `ended`, `stopped`, or `failed` |
+| `volume` | Read/write gain; applies to this play only |
+| `stop()` | Idempotent; returns the same promise as `finished` |
+| `[Symbol.asyncDispose]()` | Stops and awaits completion |
+
+`pending` includes file validation and engine startup. `playing` means the
+engine accepted and started the sound, not that the first sample has reached
+the speaker. Stop-before-dispatch creates no voice. Stop-after-dispatch waits
+for acknowledgment. A simultaneous natural end may win the race and return
+`ended`; it is never retroactively changed to `stopped`.
+
+A pre-aborted signal resolves to `stopped` without file or device access.
+Signal listeners are removed when the playback settles. Abortion does not
+reject with `AbortError`; actual failures do reject. Valid volume assignments
+after completion are harmless; invalid values always throw. `stop()` after
+failure returns the already-rejected completion promise.
+
+Always observe `finished`. Ignoring a rejected completion promise follows
+Node's ordinary unhandled-rejection behavior; the library does not silently
+discard audio failures or add global rejection handlers.
+
+```ts
+import { play, AudioError } from 'node-playsound';
+
+try {
+  const result = await play('./message.mp3', {
+    signal: AbortSignal.timeout(5_000),
+  }).finished;
+  console.log(result); // 'ended' or 'stopped'
+} catch (error) {
+  if (error instanceof AudioError) console.error(error.code, error.message);
+  else throw error;
+}
+```
+
+## Shutdown
+
+`await player.close()` stops pending and active playback and waits for the
+engine process to exit. It is idempotent and permanently closes the player.
+Later calls to `play()` reject through `finished` with `PLAYER_CLOSED`.
+Closing an unused player starts no process. A player can recover from an
+engine failure on its next play, but cannot recover from explicit closure.
+
+Active playback keeps Node alive. Idle engines close automatically after
+250 ms; explicit `close()` avoids that idle interval. A normal shutdown can
+take up to two seconds if the native engine is unresponsive before it is
+forcefully terminated. Parent death also terminates the engine independently
+of the command pipe. No process-wide signal handlers are installed.
+
+For service shutdown, keep an application-owned `Player` and call `close()`
+from your existing shutdown procedure. With worker threads, each worker has
+its own shared player; pipe closure cleans up its engine when the worker exits.
+
+## Errors
+
+Invalid arguments throw `TypeError` or `RangeError` synchronously. Operational
+failures reject `finished` with an `AudioError`, a stable `code`, a readable
+message, and a `cause` chain where available. Do not parse message text.
+
+| Code | Meaning / action |
+| --- | --- |
+| `FILE_ERROR` | Missing, unreadable, or non-regular file; check the path and permissions |
+| `DECODE_ERROR` | Decoder could not open/read the audio; check format and file integrity |
+| `DEVICE_ERROR` | No usable audio session/device, or device stopped; check system audio |
+| `ENGINE_ERROR` | Missing executable, permissions, process failure, or protocol failure; reinstall/check deployment |
+| `UNSUPPORTED_PLATFORM` | No bundled executable for this OS/architecture |
+| `PLAYBACK_LIMIT` | Wait for or stop a play, or deliberately increase the player's limit |
+| `PLAYER_CLOSED` | Construct a new player |
+| `TIMEOUT` | Startup exceeded 10 seconds or stopping exceeded 2 seconds |
+
+A file can change between Node's validation and the native open. Such
+failures may surface as `DECODE_ERROR`. Valid empty/truncated files may fail
+or end early depending on what their decoder can recover. Playback is not
+a file-integrity validator. Engine-wide failures reject all plays owned by
+that engine. A single decoder failure does not cancel other sounds.
