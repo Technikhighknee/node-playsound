@@ -76,7 +76,8 @@ any archive that the OS cannot execute directly.
 
 ## Vendor updates
 
-The unmodified miniaudio header is pinned by SHA-256 in
-`scripts/native-manifest.mjs` and `THIRD_PARTY_NOTICES.md`. Review upstream
-changes and licenses, replace the header deliberately, update both pins,
+The modified miniaudio header is pinned by SHA-256 in
+`scripts/native-manifest.mjs`; upstream provenance and the local error-handling
+fixes are recorded in `THIRD_PARTY_NOTICES.md`. Review upstream changes and
+licenses, preserve or verify upstream replacements for those fixes, update the pin,
 then rebuild and test all platforms. Never download code during installation.

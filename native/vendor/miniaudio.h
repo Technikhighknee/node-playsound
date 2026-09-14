@@ -72000,6 +72000,11 @@ static void ma_resource_manager_data_stream_fill_page(ma_resource_manager_data_s
 
     /* Just read straight from the decoder. It will deal with ranges and looping for us. */
     result = ma_data_source_read_pcm_frames(&pDataStream->decoder, pPageData, pageSizeInFrames, &totalFramesReadForThisPage);
+    /* node-playsound: a failed page refill is not successful end-of-stream. */
+    if (result != MA_SUCCESS && result != MA_AT_END) {
+        ma_atomic_compare_and_swap_i32(&pDataStream->result, MA_BUSY, result);
+        ma_atomic_compare_and_swap_i32(&pDataStream->result, MA_SUCCESS, result);
+    }
     if (result == MA_AT_END || totalFramesReadForThisPage < pageSizeInFrames) {
         ma_atomic_exchange_32(&pDataStream->isDecoderAtEnd, MA_TRUE);
     }
@@ -72262,7 +72267,15 @@ MA_API ma_result ma_resource_manager_data_stream_seek_to_pcm_frame(ma_resource_m
     job.order = ma_resource_manager_data_stream_next_execution_order(pDataStream);
     job.data.resourceManager.seekDataStream.pDataStream = pDataStream;
     job.data.resourceManager.seekDataStream.frameIndex  = frameIndex;
-    return ma_resource_manager_post_job(pDataStream->pResourceManager, &job);
+    /* node-playsound: expose failed seek submission to the stream owner. */
+    {
+        ma_result result = ma_resource_manager_post_job(pDataStream->pResourceManager, &job);
+        if (result != MA_SUCCESS) {
+            ma_atomic_compare_and_swap_i32(&pDataStream->result, MA_SUCCESS, result);
+            ma_atomic_fetch_sub_32(&pDataStream->seekCounter, 1);
+        }
+        return result;
+    }
 }
 
 MA_API ma_result ma_resource_manager_data_stream_get_data_format(ma_resource_manager_data_stream* pDataStream, ma_format* pFormat, ma_uint32* pChannels, ma_uint32* pSampleRate, ma_channel* pChannelMap, size_t channelMapCap)
@@ -73299,7 +73312,13 @@ static ma_result ma_job_process__resource_manager__seek_data_stream(ma_job* pJob
     With seeking we just assume both pages are invalid and the relative frame cursor at position 0. This is basically exactly the same as loading, except
     instead of initializing the decoder, we seek to a frame.
     */
-    ma_decoder_seek_to_pcm_frame(&pDataStream->decoder, pJob->data.resourceManager.seekDataStream.frameIndex);
+    /* node-playsound: do not silently resume from the old cursor on failure. */
+    result = ma_decoder_seek_to_pcm_frame(&pDataStream->decoder, pJob->data.resourceManager.seekDataStream.frameIndex);
+    if (result != MA_SUCCESS) {
+        ma_atomic_compare_and_swap_i32(&pDataStream->result, MA_SUCCESS, result);
+        ma_atomic_fetch_sub_32(&pDataStream->seekCounter, 1);
+        goto done;
+    }
 
     /* After seeking we'll need to reload the pages. */
     ma_resource_manager_data_stream_fill_pages(pDataStream);
