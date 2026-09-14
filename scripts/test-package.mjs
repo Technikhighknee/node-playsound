@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, readdirSync, mkdirSyn
 import { resolve, join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkPackage } from './check-package.mjs';
+import { packArchive } from './archive.mjs';
 
 // --local checks installation on this host before CI assembles the other builds.
 // It never changes or bypasses the release prepack/prepublish checks.
@@ -18,10 +19,12 @@ function run(command, args, cwd) {
 }
 if (!npm) throw new Error('Run through npm: npm run test:package [-- --local]');
 try {
-  const packed = JSON.parse(run(process.execPath, [npm, 'pack', '--ignore-scripts', '--json', '--pack-destination', temporary], process.cwd()))[0];
+  const packed = packArchive(temporary);
   const names = packed.files.map(file => file.path);
   const allowed = /^(?:package\.json|README\.md|LICENSE|THIRD_PARTY_NOTICES\.md|dist\/[a-z]+\.(?:js|d\.ts)|bin\/(?:win32|darwin|linux)-(?:x64|arm64)\/(?:playsound(?:\.exe)?|manifest\.json))$/;
   for (const name of names) if (!allowed.test(name)) throw new Error(`Unexpected package file: ${name}`);
+  for (const file of packed.files) if (/^bin\/[^/]+\/playsound(?:\.exe)?$/.test(file.path) && file.mode !== 0o755)
+    throw new Error(`Native executable has incorrect archive permissions: ${file.path}`);
   if (!names.includes('dist/index.d.ts') || !names.includes('LICENSE')) throw new Error('Missing public package files.');
   const consumer = join(temporary, 'consumer');
   mkdirSync(consumer);

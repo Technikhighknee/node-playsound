@@ -46,7 +46,10 @@ assembles all six executables, validates their source/binary hashes and
 architectures, verifies exported types, then produces the `npm-package`
 artifact. It does not publish automatically.
 
-`npm pack` fails if any target is absent or stale. `test:package -- --local`
+`npm run package` fails if any target is absent or stale. It preserves executable
+permissions in the tarball even when run on Windows. Plain `npm pack` is
+supported on Unix hosts; on Windows its guard directs you to `npm run package`.
+`test:package -- --local`
 is explicitly a local-install check, not a release-readiness assertion.
 Release artifact files exclude tests, C source, toolchains, debug symbols,
 and development dependencies. Source remains in Git, with miniaudio's license.

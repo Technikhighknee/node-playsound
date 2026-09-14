@@ -69,7 +69,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm run test:package
-      - run: npm pack
+      - run: npm run package
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: npm-package

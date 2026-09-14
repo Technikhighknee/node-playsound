@@ -20,7 +20,8 @@
     "test:package": "node scripts/test-package.mjs",
     "test:device": "node scripts/test-device.mjs",
     "check": "npm run typecheck && npm test",
-    "prepack": "npm run build && node scripts/check-package.mjs",
+    "package": "npm run build && node scripts/pack.mjs",
+    "prepack": "npm run build && node scripts/prepack.mjs",
     "prepublishOnly": "node scripts/check-package.mjs"
   },
   "devDependencies": { "@types/node": "^22.0.0", "typescript": "~5.9.3" }
