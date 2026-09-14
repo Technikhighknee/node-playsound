@@ -1,0 +1,9 @@
+node_modules/
+dist/
+bin/
+.tools/
+.tmp/
+*.tgz
+*.obj
+*.pdb
+*.ilk
