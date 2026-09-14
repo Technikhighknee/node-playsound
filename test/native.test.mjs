@@ -50,6 +50,30 @@ for (const format of ['mp3', 'flac']) {
   });
 }
 
+test('native: capacity exhaustion and repeated full batches release every voice', { timeout: 90000 }, async t => {
+  const { path } = await fixture(t, 120);
+  const p = await engine(t);
+  const encoded = Buffer.from(path).toString('hex');
+  for (let batch = 0; batch < 2; batch++) {
+    const base = batch * 300;
+    for (let i = 1; i <= 256; i++) {
+      p.send(`P ${base + i} 0 ${encoded}`);
+      assert.equal(await p.next(), `STARTED ${base + i}`);
+    }
+    p.send(`P ${base + 257} 0 ${encoded}`);
+    assert.equal(await p.next(), `ERROR ${base + 257} LIMIT 0`);
+    for (let i = 1; i <= 256; i++) {
+      p.send(`S ${base + i}`);
+      assert.equal(await p.next(), `DONE ${base + i} stopped`);
+    }
+  }
+  // A failed allocation must not leave the engine permanently saturated.
+  p.send(`P 1000 0 ${encoded}`);
+  assert.equal(await p.next(), 'STARTED 1000');
+  p.send('S 1000');
+  assert.equal(await p.next(), 'DONE 1000 stopped');
+});
+
 test('native: stop, volume, repeat, and a bad file do not poison the engine', { timeout: 10000 }, async t => {
   const { path, directory } = await fixture(t, 1);
   const broken = join(directory, 'broken.mp3');
