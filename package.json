@@ -7,7 +7,7 @@
   "engines": { "node": ">=22" },
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "types": "./dist/index.d.ts",
-  "files": ["dist", "bin", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "files": ["dist", "bin/*/playsound", "bin/*/playsound.exe", "bin/*/manifest.json", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "sideEffects": false,
   "keywords": ["audio", "sound", "play", "mp3", "wav", "flac", "typescript"],
   "scripts": {
@@ -15,8 +15,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
     "build:native": "node scripts/build-native.mjs",
+    "build:test-native": "node scripts/build-native.mjs --test && node scripts/build-native.mjs --render-test",
+    "test:unit": "npm run build && node --test test/player.test.mjs",
+    "test:package": "node scripts/test-package.mjs",
+    "test:device": "node scripts/test-device.mjs",
     "check": "npm run typecheck && npm test",
-    "prepack": "npm run build && node scripts/check-package.mjs"
+    "prepack": "npm run build && node scripts/check-package.mjs",
+    "prepublishOnly": "node scripts/check-package.mjs"
   },
   "devDependencies": { "@types/node": "^22.0.0", "typescript": "~5.9.3" }
 }
