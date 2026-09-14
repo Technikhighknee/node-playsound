@@ -153,7 +153,10 @@ export class Controller {
       entry.removeAbort = () => signal.removeEventListener('abort', abort);
     }
     entry.timer = setTimeout(() => this.#timeout(entry, 'Audio playback did not start within 10 seconds.'), 10_000);
-    void this.#start(entry);
+    // Immediate stop/abort/close should not even enqueue a filesystem request.
+    queueMicrotask(() => {
+      if (!this.#closed && this.#entries.has(id)) void this.#start(entry);
+    });
     return handle;
   }
 
@@ -163,6 +166,7 @@ export class Controller {
       if (this.#closed || !this.#entries.has(entry.id)) return;
       if (!info.isFile()) throw new AudioError('FILE_ERROR', 'Audio source must be a regular file.');
     } catch (cause) {
+      if (this.#closed) return;
       this.#settle(entry, cause instanceof AudioError ? cause : new AudioError('FILE_ERROR', 'Could not open the audio file.', { cause }));
       return;
     }
