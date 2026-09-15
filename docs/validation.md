@@ -1,30 +1,32 @@
 # Release candidate validation
 
-Recorded on 2026-09-14. This is an unpublished npm release candidate;
+Recorded on 2026-09-15. This is an unpublished npm release candidate;
 automated platform validation does not imply physical hardware validation.
 
-[GitHub Actions run 34900194573](https://github.com/Technikhighknee/node-playsound/actions/runs/34900194573)
-passed at commit `f02903deb8fe399e6c4542c7c47e62af307bfaf0`, including seeking
-and the decoder-error/completion-race fix. All six native
-jobs built and tested on their target operating system and architecture,
-using both Node 22 and Node 24. The final package assembly and installation
-checks also passed, producing the downloadable `npm-package` artifact.
+The public-decoder streaming rewrite and stop/backpressure regression tests
+are tracked in [GitHub Actions run 34956963785](https://github.com/Technikhighknee/node-playsound/actions/runs/34956963785)
+at commit `6e8cb75ed3c77f621e14752f526a050e8b3cb84c`. The workflow builds and
+tests on all six target operating systems and architectures under Node 22
+and Node 24, then assembles and installs the complete package. A separate
+Linux job checks native PCM and concurrent buffer ownership with AddressSanitizer,
+UndefinedBehaviorSanitizer, and leak detection. Consult the linked job results;
+a release requires all checks green for its exact commit.
 
 | Check | Evidence |
 | --- | --- |
-| CI: Windows, macOS, Linux; x64 and ARM64 | All 55 tests pass on each target under Node 22 and Node 24 |
-| Windows x64, Node 24.14.0 | Strict typecheck, build, and 55 tests pass locally |
-| Real Windows output | MP3 and WAV device initialization/playback reach completion |
+| CI: Windows, macOS, Linux; x64 and ARM64 | 64-test suite under Node 22 and Node 24; see linked CI results |
+| Windows x64, Node 24.14.0 | Strict typecheck, build, and 64 tests pass locally |
+| Real Windows output | WAV, MP3, and FLAC device playback reach completion |
 | Production Windows seeking | A five-second WAV sought to 4.5 seconds completes in under one second |
 | Installed ESM consumer | Tarball installed with scripts disabled and no runtime dependencies |
 | Baseline Windows-built archive on Linux | Installation preserves executable permissions; missing audio reports `DEVICE_ERROR` |
 | Installed TypeScript consumer | Public imports, `seek(number): void`, and compile-time misuse checks pass |
-| Native builds | All six targets compile and execute in CI |
+| Native builds | All six targets cross-compile locally; CI executes native target builds |
 | Archive | Source/binary hashes, target machine types, allowed files, and executable modes checked |
 
 The native tests exercise two full batches of 256 simultaneous native
 voices, capacity overflow, and successful playback after releasing all slots.
-These tests passed on all six targets.
+Capacity and reuse are exercised on each CI target.
 
 Seeking coverage includes streamed WAV/MP3/FLAC forward and backward seeks,
 beyond-end completion, malformed protocol input, invalid arguments, pending
@@ -33,6 +35,15 @@ non-extendable seek/stop deadlines. Direct PCM tests verify that seeking moves
 between silent and audible regions, and injected decoder seek/refill failures
 verify explicit errors and voice destruction. Unknown-length seeking fails
 explicitly as documented. Physical macOS/Linux seeking remains unverified.
+
+The header checksum matches unmodified miniaudio 0.11.23. Buffer tests compare
+all decoded samples against an independent decoder across wrap-around and
+sample-rate conversion. They block one worker while its peer continues,
+seek during the blocked refill, preserve stale-generation decoder errors,
+and hold destruction until the outstanding job releases ownership. A stalled
+background job is verified to exit with an explicit timeout. The transport
+regression pauses child input and fills the OS pipe before queuing seek and
+stop; it checks that the stopped voice's seek is removed and its peer's survives.
 
 Forced worker termination ends native execution, including a blocked decoder.
 On Linux, the exited process can remain a zombie under the surviving Node
