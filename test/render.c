@@ -223,6 +223,7 @@ static int run(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
+    setvbuf(stdout, NULL, _IONBF, 0); // Match the production protocol before _Exit.
     if (!stream_pool_init()) return 2;
     int result = run(argc, argv);
     stream_pool_uninit();

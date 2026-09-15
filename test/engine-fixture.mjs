@@ -1,5 +1,6 @@
 // A deliberately adversarial subprocess for exercising the real pipe transport.
 import { createInterface } from 'node:readline';
+import { existsSync } from 'node:fs';
 const mode = process.argv[2];
 if (mode === 'exit') process.exit(17);
 if (mode === 'oversize') process.stdout.write('x'.repeat(1024));
@@ -17,7 +18,17 @@ reader.on('line', line => {
   const [op, id] = line.split(' ');
   if (op === 'QUIT') process.exit(0);
   if (mode === 'backpressure') {
-    if (op === 'P') process.stdout.write(`STARTED ${id}\n`);
+    if (op === 'P') {
+      if (id === '1') {
+        const gate = Buffer.from(line.split(' ')[3], 'hex').toString();
+        reader.pause();
+        const resume = setInterval(() => {
+          if (existsSync(gate)) { clearInterval(resume); reader.resume(); }
+        }, 5);
+        reader.once('close', () => clearInterval(resume));
+      }
+      process.stdout.write(`STARTED ${id}\n`);
+    }
     if (op === 'Q') process.stdout.write(`SEEKED ${id}\n`);
     if (op === 'S') process.stdout.write(`DONE ${id} stopped\n`);
     return;
