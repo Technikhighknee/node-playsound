@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
 
 - Fix Windows native engines built with optional features of the CI host CPU,
   which could crash on other machines with `0xC000001D` before playback started.

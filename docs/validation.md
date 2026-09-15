@@ -12,8 +12,23 @@ CI had tested its own CPU-specific build on a CPU that supported it.
 
 The earlier successful matrix below therefore does **not** establish CPU
 portability of 0.1.0. The corrective source explicitly selects a baseline and
-rejects globally enabled AVX features in x64 builds. A new npm release is
-needed to replace the defective distributed build.
+rejects globally enabled AVX features in x64 builds. Version 0.1.1 contains
+the corrective build settings.
+
+## 0.1.1 fix validation
+
+[CI run 35029136651](https://github.com/Technikhighknee/node-playsound/actions/runs/35029136651)
+passed for fix commit `56ffb3b5c69200cabd9f411804f9a66cc9e6c86a`: all six target
+platforms on Node 22 and 24, 65 tests, sanitizers, documentation checks, and
+complete package installation/publication dry-run checks.
+
+The actual CI-built Windows x64 artifact was downloaded and verified against
+its source and binary manifests, then run on the affected Ryzen 5600X. Startup,
+playback, seeking to 80 seconds, and stopping passed. Its SHA-256 was
+`b9efe02000237af4b2054767b66a8fc08c7e5bc7a4f40ce8ec8986d079cc90ef`.
+The unchanged consumer example also played its MP3 to natural completion with
+the locally rebuilt baseline helper. An intentionally AVX-512-targeted build
+was rejected by the compilation guard.
 
 ## Earlier validation record
 

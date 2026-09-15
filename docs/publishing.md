@@ -2,15 +2,15 @@
 
 [Documentation](../README.md#documentation) · [API reference](api.md)
 
-The first planned npm release is `node-playsound@0.1.0`. Repository preparation
-and an npm publish dry-run do not publish or reserve that name. The README's
-registry install command becomes available only after publication succeeds.
+This guide uses `node-playsound@0.1.1` as the release example. Substitute the
+version being released in filenames, commands, and tags. A publish dry-run
+never uploads a package; publishing the verified archive is a separate action.
 
 ## Prepare the release
 
 1. Merge the release changes into `master`. Keep `package.json` and
-   `package-lock.json` versions aligned and update `CHANGELOG.md`. For later
-   releases, `npm version <version> --no-git-tag-version` updates both manifests;
+   `package-lock.json` versions aligned and update `CHANGELOG.md`. For a new
+   release, `npm version <version> --no-git-tag-version` updates both manifests;
    commit the reviewed changes before building.
 2. Open this repository's [Build and verify workflow](https://github.com/Technikhighknee/node-playsound/actions/workflows/ci.yml).
    Select the run for the exact release commit on `master`. Require the entire
@@ -21,7 +21,7 @@ registry install command becomes available only after publication succeeds.
    Consult [validation.md](validation.md): physical macOS/Linux listening is
    still unverified. CI's silent backend is not evidence of speaker output.
 4. Download that run's `npm-package` artifact and extract its ZIP into a separate
-   release directory. For 0.1.0 it contains `node-playsound-0.1.0.tgz`. Use this
+   release directory. For 0.1.1 it contains `node-playsound-0.1.1.tgz`. Use this
    complete archive, not an individual `native-*` artifact or an older local build.
 
 The archive contains all six native engines, JavaScript, declarations, license,
@@ -41,19 +41,20 @@ repository. From the extracted artifact directory:
 npm login --registry=https://registry.npmjs.org/
 npm whoami --registry=https://registry.npmjs.org/
 npm view node-playsound name version maintainers --registry=https://registry.npmjs.org/
-npm publish ./node-playsound-0.1.0.tgz --dry-run --ignore-scripts --access public --registry=https://registry.npmjs.org/
+npm publish ./node-playsound-0.1.1.tgz --dry-run --ignore-scripts --access public --registry=https://registry.npmjs.org/
 ```
 
-Before the first publication, `npm view` is expected to report `E404`. This is
-not a reservation or a guarantee that npm will accept the name. If a package
-already exists, verify ownership before continuing. A dry-run checks packaging;
-it does not prove publishing permission or satisfy the account's 2FA challenge.
+Verify that the signed-in account is a maintainer of the existing package.
+Check `npm view node-playsound@0.1.1 version` before publishing: that exact
+version must not already exist. An `E404` for a new name/version does not
+reserve it. A dry-run checks packaging; it does not prove publishing permission
+or satisfy the account's 2FA challenge.
 
 When the reviewed artifact and account are ready, the following command makes
-0.1.0 publicly installable under the `latest` tag:
+0.1.1 publicly installable under the `latest` tag:
 
 ```sh
-npm publish ./node-playsound-0.1.0.tgz --ignore-scripts --access public --tag latest --registry=https://registry.npmjs.org/
+npm publish ./node-playsound-0.1.1.tgz --ignore-scripts --access public --tag latest --registry=https://registry.npmjs.org/
 ```
 
 Follow npm's authentication prompts. `--ignore-scripts` is intentional: the
@@ -64,13 +65,13 @@ A published name/version cannot be reused, even after unpublishing.
 ## Verify and record
 
 ```sh
-npm view node-playsound@0.1.0 version dist.integrity dist.tarball --registry=https://registry.npmjs.org/
-npm install node-playsound@0.1.0 --ignore-scripts --registry=https://registry.npmjs.org/
+npm view node-playsound@0.1.1 version dist.integrity dist.tarball --registry=https://registry.npmjs.org/
+npm install node-playsound@0.1.1 --ignore-scripts --registry=https://registry.npmjs.org/
 ```
 
 Run the installation command in a fresh consumer project. Try the README playback
 example with a local audio file. Compare `dist.integrity` with the SHA-512 integrity
-printed by the successful CI packaging step. Tag the exact tested commit `v0.1.0`
+printed by the successful CI packaging step. Tag the exact tested commit `v0.1.1`
 and create a GitHub release using the changelog and the same archive; do not tag a
 newer commit merely because `master` has advanced.
 
