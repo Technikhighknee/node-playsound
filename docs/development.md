@@ -54,17 +54,9 @@ is explicitly a local-install check, not a release-readiness assertion.
 Release artifact files exclude tests, C source, toolchains, debug symbols,
 and development dependencies. Source remains in Git, with miniaudio's license.
 
-Before publishing:
-
-1. Confirm ownership/availability of the npm name; set repository metadata
-   once this repository has an actual remote. No author or remote is invented.
-2. Set the version, update release notes, and require a green six-platform CI
-   run for that exact commit. Do not mix artifacts from different commits.
-3. Run/listen to real-device WAV/MP3/FLAC playback, overlapping sounds, volume,
-   stop, and shutdown on Windows, macOS, and Linux. Record results.
-4. Inspect the CI `.tgz` contents, license, API declarations, and installed
-   consumer output. Publish that exact verified tarball using npm's usual
-   account controls. Publishing is a separate maintainer action.
+For versioning, release checks, downloading the verified artifact, and the
+first npm publication, follow [Publishing](publishing.md). The workflow only
+builds and dry-runs publication; it never uploads a package to npm.
 
 Linux binaries built on Ubuntu 22.04 target glibc 2.35+. Test audio on both
 PulseAudio/PipeWire-compatible and ALSA setups. macOS builds set deployment
