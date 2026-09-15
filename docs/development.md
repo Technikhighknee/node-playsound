@@ -1,5 +1,7 @@
 # Development and release
 
+[Documentation](../README.md#documentation) · [API reference](api.md)
+
 Prerequisites: Node 22+, npm, and a C11 compiler. Windows builds use Zig 0.14.1
 in CI; macOS uses the Xcode command-line compiler; Linux uses GCC. Compilers
 are for maintainers only. End users install a prebuilt tarball.
@@ -23,6 +25,12 @@ npm run build:native
 npm run build:test-native
 npm run check
 ```
+
+`npm run test:docs` builds the public declarations, typechecks every TypeScript
+snippet in the documentation as a standalone example, and checks local links
+and heading anchors. It needs no native compiler or audio device. Keep snippets
+self-contained with their own imports; shell commands are instructions, not
+executed tests. The full `check` workflow includes this documentation check.
 
 `npm run test:unit` needs no native compiler or audio device. `npm test` runs
 unit, process-transport, native decoder, PCM rendering, and lifecycle tests;

@@ -23,7 +23,8 @@
     "test:unit": "npm run build && node --test test/player.test.mjs",
     "test:package": "node scripts/test-package.mjs",
     "test:device": "node scripts/test-device.mjs",
-    "check": "npm run typecheck && npm test",
+    "test:docs": "npm run build && node scripts/check-docs.mjs",
+    "check": "npm run typecheck && npm test && npm run test:docs",
     "package": "npm run build && node scripts/pack.mjs",
     "prepack": "npm run build && node scripts/prepack.mjs",
     "prepublishOnly": "node scripts/check-package.mjs"
