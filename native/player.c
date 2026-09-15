@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: CC0-1.0 */
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
