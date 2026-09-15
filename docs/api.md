@@ -1,6 +1,11 @@
-# API
+# API reference
 
-```ts
+[Quickstart](../README.md) · [Recipes](recipes.md) · [Troubleshooting](troubleshooting.md)
+
+Use `play` for an individual sound, `sound` for reusable defaults, and `Player`
+for an application-owned group. All are named exports from `node-playsound`.
+
+```text
 play(file: string | URL, options?: PlayOptions): Playback
 sound(file: string | URL, options?: SoundOptions): Sound
 new Player(options?: PlayerOptions)
@@ -10,11 +15,17 @@ new Player(options?: PlayerOptions)
 the same `play` and `sound` methods, plus `close(): Promise<void>` and
 `[Symbol.asyncDispose]()`. Construction and import perform no I/O.
 
+## Files and paths
+
 Paths resolve against `process.cwd()` when `play()` or `sound()` is called.
 A `Sound` retains that absolute path even if the working directory changes.
 A URL must use `file:`. No shell parses filenames; spaces, quotes, Unicode,
 and newlines are encoded safely. Windows uses wide-character file APIs.
 Symbolic links to regular files are allowed. Do not modify files during playback.
+
+A string such as `"file:///tmp/tone.wav"` is a path string, not a URL; pass a `URL` object for
+URL semantics. Relative paths refer to the working directory, not this module.
+See [path examples](recipes.md#resolve-files-reliably).
 
 ## Options
 
@@ -29,6 +40,23 @@ Symbolic links to regular files are allowed. Do not modify files during playback
 configuration, with no open file or device to dispose. Repeated calls share
 the player's mixer, not the playhead. Each play can be stopped independently.
 There is no implicit queue when the concurrency limit is reached.
+
+## Player and Sound
+
+| Member | Behavior |
+| --- | --- |
+| `new Player(options?)` | Creates an independent owner; opens no device or process yet |
+| `player.play(file, options?)` | Creates one playback owned by this player |
+| `player.sound(file, options?)` | Captures a path and defaults for plays owned by this player |
+| `player.close()` | Returns `Promise<void>`; waits for cleanup and permanently closes the player |
+| `player[Symbol.asyncDispose]()` | Equivalent to `close()` |
+| `sound.play(options?)` | Creates a new independent playback on its original player |
+
+Top-level `play` and `sound` share the default player and its concurrency limit.
+There is no global close function; use an explicit `Player` for deterministic
+shutdown. A `Sound` outliving its player cannot reopen it: its next play rejects
+with `PLAYER_CLOSED`. `close()` releases resources; it does not replace observing
+each playback's `finished` promise for errors.
 
 ## Playback
 
@@ -60,6 +88,8 @@ discard audio failures or add global rejection handlers.
 ### Seeking
 
 ```ts
+import { play } from 'node-playsound';
+
 const playback = play('./track.mp3');
 playback.seek(80); // Absolute seconds from the beginning; fractions are allowed.
 await playback.finished;
@@ -85,18 +115,23 @@ Keep observing `finished` for errors, as with volume changes.
   have no effect. Stop, abort, and close retain their existing behavior and deadlines.
 - Streamed WAV, MP3, and FLAC support seeking when their decoder supplies a
   known length and supports the target. Unknown length or a failed seek/refill
-  fails that playback with `DECODE_ERROR`. A stuck seek or background decoder operation fails its engine after
-  ten seconds with `TIMEOUT`, rejecting its other active plays too. Device and
+  fails that playback with `DECODE_ERROR`. A stuck seek or background decoder
+  operation fails its engine after ten seconds with `TIMEOUT`, rejecting its other active plays too. Device and
   process failures retain their existing error codes and scope.
 
-Positions are converted to whole PCM frames at the engine sample rate. Decoding and output
-buffering can introduce a short delay, silence, or buffered audio from the
+Positions are converted to whole PCM frames at the engine sample rate. Decoding
+and output buffering can introduce a short delay, silence, or buffered audio from the
 old position. Stop removes unwritten seek commands from Node's queue; a seek
 already written to the pipe may run before the stop is processed.
 There is no sample-accurate or gapless-seeking guarantee.
 MP3 seeking may require decoding earlier frames and can be slower on long files.
 Position and duration getters are deliberately absent: the decoder cursor can
 lead audible output, and some streams have no reliable length.
+
+## Cancellation
+
+Cancellation is a request to stop, not a decoder error. A timeout signal resolves
+playback to `stopped`; the library's own operation timeout rejects with `TIMEOUT`.
 
 ```ts
 import { play, AudioError } from 'node-playsound';
@@ -156,3 +191,25 @@ failures may surface as `DECODE_ERROR`. Valid empty/truncated files may fail
 or end early depending on what their decoder can recover. Playback is not
 a file-integrity validator. Engine-wide failures reject all plays owned by
 that engine. A single decoder failure does not cancel other sounds.
+
+## TypeScript
+
+Types ship with the package; no separate `@types` package is needed. Public
+exports include `AudioFile`, `Playback`, `PlaybackResult`, `PlaybackState`,
+`PlayOptions`, `Sound`, `SoundOptions`, `PlayerOptions`, and `AudioErrorCode`.
+Import types with `import type`. Use an ESM project with TypeScript's `NodeNext`
+module settings, or a `.mts` source file. Plain JavaScript examples use `.mjs`.
+
+```ts
+import { play, type Playback, type PlaybackResult } from 'node-playsound';
+
+const playback: Playback = play('./tone.wav');
+const result: PlaybackResult = await playback.finished;
+console.log(result);
+```
+
+Both `Player` and `Playback` implement `AsyncDisposable`. With TypeScript,
+`await using` requires `ESNext.Disposable` in `lib` (or a library target that
+includes it). When running JavaScript directly, your Node version must support
+the syntax. The `try`/`finally` examples work across the supported Node range.
+Disposing a playback awaits `stop()` and can reject if playback failed.

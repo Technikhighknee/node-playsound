@@ -1,5 +1,7 @@
 # Publishing
 
+[Documentation](../README.md#documentation) · [API reference](api.md)
+
 The first planned npm release is `node-playsound@0.1.0`. Repository preparation
 and an npm publish dry-run do not publish or reserve that name. The README's
 registry install command becomes available only after publication succeeds.
