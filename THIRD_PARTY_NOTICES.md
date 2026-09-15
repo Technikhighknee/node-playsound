@@ -9,12 +9,9 @@ Source: https://github.com/mackron/miniaudio/tree/0.11.23
 Upstream unmodified header SHA-256:
 `7e4f3f13c8fe66df2080ac3dd12a89193e3c2463cb7f067c798abd7331cd8ee6`
 
-The vendored header has three small, marked `node-playsound` fixes: publish
-stream seek-job submission errors, decoder seek errors, and page-refill errors
-through the stream's atomic result. Upstream otherwise discards these errors,
-which can silently resume playback or report successful completion. Updates
-preserve the unavailable state during concurrent destruction. The modified
-header checksum is pinned in `scripts/native-manifest.mjs`.
+The vendored header is unmodified. Its checksum is pinned in
+`scripts/native-manifest.mjs`. Streaming uses public decoder and data-source
+APIs; no vendor patches or private miniaudio fields are required.
 
 Project-authored code is dedicated to the public domain under CC0-1.0.
 Compiler and operating-system components retain their respective licenses.

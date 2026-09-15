@@ -85,13 +85,15 @@ Keep observing `finished` for errors, as with volume changes.
   have no effect. Stop, abort, and close retain their existing behavior and deadlines.
 - Streamed WAV, MP3, and FLAC support seeking when their decoder supplies a
   known length and supports the target. Unknown length or a failed seek/refill
-  fails that playback with `DECODE_ERROR`. A stuck seek fails its engine after
+  fails that playback with `DECODE_ERROR`. A stuck seek or background decoder operation fails its engine after
   ten seconds with `TIMEOUT`, rejecting its other active plays too. Device and
   process failures retain their existing error codes and scope.
 
-Positions are converted to whole source PCM frames. Decoding and output
+Positions are converted to whole PCM frames at the engine sample rate. Decoding and output
 buffering can introduce a short delay, silence, or buffered audio from the
-old position. There is no sample-accurate or gapless-seeking guarantee.
+old position. Stop removes unwritten seek commands from Node's queue; a seek
+already written to the pipe may run before the stop is processed.
+There is no sample-accurate or gapless-seeking guarantee.
 MP3 seeking may require decoding earlier frames and can be slower on long files.
 Position and duration getters are deliberately absent: the decoder cursor can
 lead audible output, and some streams have no reliable length.
@@ -147,7 +149,7 @@ message, and a `cause` chain where available. Do not parse message text.
 | `UNSUPPORTED_PLATFORM` | No bundled executable for this OS/architecture |
 | `PLAYBACK_LIMIT` | Wait for or stop a play, or deliberately increase the player's limit |
 | `PLAYER_CLOSED` | Construct a new player |
-| `TIMEOUT` | Startup or a seek exceeded 10 seconds, or stopping exceeded 2 seconds |
+| `TIMEOUT` | Startup, a seek, or background decoding exceeded 10 seconds, or stopping exceeded 2 seconds |
 
 A file can change between Node's validation and the native open. Such
 failures may surface as `DECODE_ERROR`. Valid empty/truncated files may fail

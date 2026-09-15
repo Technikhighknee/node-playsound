@@ -2,6 +2,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
+#define MA_NO_RESOURCE_MANAGER
 #ifndef PLAYSOUND_TEST
 #define MA_NO_NULL
 #endif
@@ -13,7 +14,9 @@
 
 #define MAX_VOICES 256
 #define MAX_LINE 131200
-typedef struct { unsigned id; ma_sound sound; int seeking; } voice;
+#include "platform.h"
+#include "stream.h"
+typedef struct { unsigned id; ma_sound sound; ps_stream stream; int seeking; } voice;
 static voice voices[MAX_VOICES];
 static char mailbox[MAX_LINE];
 static ma_mutex inbox_lock;
@@ -26,7 +29,7 @@ static HANDLE parent_handle;
 
 /* EOF alone is insufficient: the reader can be backpressured while a decoder
    is blocked. Monitor the actual parent independently of the command channel. */
-static ma_thread_result MA_THREADCALL watch_parent(void* unused)
+static PS_THREAD_RESULT watch_parent(void* unused)
 {
     (void)unused;
     for (;;) {
@@ -34,7 +37,7 @@ static ma_thread_result MA_THREADCALL watch_parent(void* unused)
         if (WaitForSingleObject(parent_handle, 100) != WAIT_TIMEOUT) _Exit(0);
 #else
         if ((unsigned long)getppid() != parent_pid) _Exit(0);
-        ma_sleep(100);
+        ps_sleep(100);
 #endif
     }
     return 0;
@@ -42,7 +45,7 @@ static ma_thread_result MA_THREADCALL watch_parent(void* unused)
 
 /* A single bounded mailbox applies backpressure all the way to Node. Only the
    main thread touches voices. EOF must also terminate a stuck decoder/device. */
-static ma_thread_result MA_THREADCALL read_commands(void* unused)
+static PS_THREAD_RESULT read_commands(void* unused)
 {
     char line[MAX_LINE];
     (void)unused;
@@ -55,16 +58,15 @@ static ma_thread_result MA_THREADCALL read_commands(void* unused)
         ma_mutex_unlock(&inbox_lock);
         /* Bound time spent backpressured too: a terminated Node worker can
            close this pipe while its parent process stays alive. */
-        ma_timer wait_timer;
-        ma_timer_init(&wait_timer);
+        double wait_start = ps_seconds();
         for (;;) {
             int occupied;
             ma_mutex_lock(&inbox_lock);
             occupied = pending;
             ma_mutex_unlock(&inbox_lock);
             if (!occupied) break;
-            if (ma_timer_get_time_in_seconds(&wait_timer) >= 10.0) _Exit(3);
-            ma_sleep(5);
+            if ((ps_seconds() - wait_start) >= 10.0) _Exit(3);
+            ps_sleep(5);
         }
     }
     _Exit(0);
@@ -81,6 +83,7 @@ static void finish(voice* v, const char* reason)
 {
     unsigned id = v->id;
     ma_sound_uninit(&v->sound);
+    stream_uninit(&v->stream);
     v->id = 0;
     v->seeking = 0;
     printf("DONE %u %s\n", id, reason);
@@ -105,7 +108,7 @@ static int command(ma_engine* engine, char* line)
 {
 #ifdef PLAYSOUND_TEST
     /* Simulate a stuck third-party decoder for worker-termination tests. */
-    if (!strcmp(line, "BLOCK\n")) { puts("BLOCKED"); ma_sleep(60000); return 1; }
+    if (!strcmp(line, "BLOCK\n")) { puts("BLOCKED"); ps_sleep(60000); return 1; }
 #endif
     char op, extra;
     unsigned id;
@@ -123,21 +126,22 @@ static int command(ma_engine* engine, char* line)
         if (!unhex(path, line + offset)) return -1;
         for (int i = 0; i < MAX_VOICES; ++i) if (!voices[i].id) { v = &voices[i]; break; }
         if (!v) { printf("ERROR %u LIMIT 0\n", id); return 1; }
-        ma_result result;
-#ifdef _WIN32
-        wchar_t wide[65537];
-        if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, 65537)) {
-            printf("ERROR %u FILE -2\n", id); return 1;
-        }
-        result = ma_sound_init_from_file_w(engine, wide, MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, NULL, &v->sound);
-#else
-        result = ma_sound_init_from_file(engine, path, MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, NULL, &v->sound);
-#endif
+        ma_result result = stream_init(&v->stream, path, ma_engine_get_sample_rate(engine));
         if (result != MA_SUCCESS) { printf("ERROR %u DECODE %d\n", id, result); return 1; }
+        result = ma_sound_init_from_data_source(engine, &v->stream, MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, &v->sound);
+        if (result != MA_SUCCESS) {
+            stream_uninit(&v->stream);
+            printf("ERROR %u DEVICE %d\n", id, result); return 1;
+        }
+        if (!stream_attach(&v->stream)) {
+            ma_sound_uninit(&v->sound); stream_uninit(&v->stream);
+            printf("ERROR %u LIMIT 0\n", id); return 1;
+        }
         ma_sound_set_volume(&v->sound, volume);
         result = ma_sound_start(&v->sound);
         if (result != MA_SUCCESS) {
             ma_sound_uninit(&v->sound);
+            stream_uninit(&v->stream);
             printf("ERROR %u DEVICE %d\n", id, result);
             return 1;
         }
@@ -162,10 +166,10 @@ static int command(ma_engine* engine, char* line)
             }
             double frames = seconds * rate;
             if (frames >= 18446744073709551616.0) result = MA_OUT_OF_RANGE;
-            else result = ma_sound_seek_to_pcm_frame(&v->sound, (ma_uint64)frames);
+            else stream_request_seek(&v->stream, (ma_uint64)frames);
         }
         if (result != MA_SUCCESS) {
-            ma_sound_uninit(&v->sound); v->id = 0; v->seeking = 0;
+            ma_sound_uninit(&v->sound); stream_uninit(&v->stream); v->id = 0; v->seeking = 0;
             printf("ERROR %u DECODE %d\n", id, result);
         } else v->seeking = 1;
     } else if (op == 'S') {
@@ -184,20 +188,19 @@ static void poll_voices(void)
     for (int i = 0; i < MAX_VOICES; ++i) {
         voice* v = &voices[i];
         if (!v->id) continue;
-        /* Sample end first: a refill failure is published before the audio
-           thread marks the sound ended, and must not become a successful end. */
+        if (stream_timed_out(&v->stream)) {
+            puts("FATAL TIMEOUT 0");
+            _Exit(3); /* A decoder job cannot be safely cancelled in-process. */
+        }
         ma_bool32 ended = ma_sound_at_end(&v->sound);
-        ma_result result = ma_resource_manager_data_source_result(v->sound.pResourceManagerDataSource);
-        if (result != MA_SUCCESS && result != MA_BUSY) {
+        ma_result result = atomic_load(&v->stream.error);
+        if (result != MA_SUCCESS) {
             unsigned id = v->id;
-            ma_sound_uninit(&v->sound); v->id = 0; v->seeking = 0;
+            ma_sound_uninit(&v->sound); stream_uninit(&v->stream); v->id = 0; v->seeking = 0;
             printf("ERROR %u DECODE %d\n", id, result);
         } else if (ended) finish(v, "ended");
-        else if (v->seeking && ma_atomic_load_64(&v->sound.seekTarget) == MA_SEEK_TARGET_NONE &&
-            ma_atomic_load_32(&v->sound.pResourceManagerDataSource->backend.stream.seekCounter) == 0) {
-            /* Pinned miniaudio atomics: the mix thread consumed the target
-               and the job thread finished refilling the stream pages. */
-            if (ma_resource_manager_data_source_result(v->sound.pResourceManagerDataSource) != MA_SUCCESS) continue;
+        else if (v->seeking && !atomic_load(&v->stream.seeking)) {
+            if (atomic_load(&v->stream.error) != MA_SUCCESS) continue;
             v->seeking = 0;
             printf("SEEKED %u\n", v->id);
         }
@@ -208,8 +211,8 @@ int main(int argc, char** argv)
 {
     ma_engine engine;
     ma_context context;
-    ma_thread reader;
-    ma_thread watcher;
+    ps_thread reader;
+    ps_thread watcher;
     ma_engine_config config = ma_engine_config_init();
     ma_result result;
     char line[MAX_LINE];
@@ -231,8 +234,8 @@ int main(int argc, char** argv)
     if (!parent_handle) return 2;
 #endif
     if (ma_mutex_init(&inbox_lock) != MA_SUCCESS) return 2;
-    if (ma_thread_create(&watcher, ma_thread_priority_normal, 0, watch_parent, NULL, NULL) != MA_SUCCESS) return 2;
-    if (ma_thread_create(&reader, ma_thread_priority_normal, 0, read_commands, NULL, NULL) != MA_SUCCESS) return 2;
+    if (!ps_thread_start(&watcher, watch_parent, NULL)) return 2;
+    if (!ps_thread_start(&reader, read_commands, NULL)) return 2;
 #ifdef PLAYSOUND_TEST
     ma_backend backend = ma_backend_null;
     result = ma_context_init(&backend, 1, NULL, &context);
@@ -244,6 +247,7 @@ int main(int argc, char** argv)
     config.notificationCallback = notification;
     result = ma_engine_init(&config, &engine);
     if (result != MA_SUCCESS) { printf("FATAL DEVICE %d\n", result); ma_context_uninit(&context); return 1; }
+    if (!stream_pool_init()) { ma_engine_uninit(&engine); ma_context_uninit(&context); return 2; }
     printf("READY 2\n");
     while (running > 0) {
         int have_line;
@@ -254,9 +258,12 @@ int main(int argc, char** argv)
         if (have_line) running = command(&engine, line);
         if (atomic_load(&device_lost)) { printf("FATAL DEVICE %d\n", MA_DEVICE_NOT_STARTED); running = -1; }
         poll_voices();
-        ma_sleep(5);
+        ps_sleep(5);
     }
-    for (int i = 0; i < MAX_VOICES; ++i) if (voices[i].id) ma_sound_uninit(&voices[i].sound);
+    for (int i = 0; i < MAX_VOICES; ++i) if (voices[i].id) {
+        ma_sound_uninit(&voices[i].sound); stream_uninit(&voices[i].stream);
+    }
+    stream_pool_uninit();
     ma_engine_uninit(&engine);
     ma_context_uninit(&context);
     /* The reader may be blocked on stdin. Process exit reclaims that thread;

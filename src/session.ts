@@ -144,6 +144,10 @@ export class Session implements Engine {
       this.fail(new AudioError('DEVICE_ERROR', `Could not use the system audio output (${line.split(' ')[2]}). Check that an output device and audio session are available.`));
       return true;
     }
+    if (line === 'FATAL TIMEOUT 0') {
+      this.fail(new AudioError('TIMEOUT', 'The audio decoder did not finish an operation within 10 seconds.'));
+      return true;
+    }
     if (!this.#ready) return false;
     const match = /^(STARTED|SEEKED|DONE|ERROR) ([1-9]\d*)(?: (ended|stopped|FILE|DECODE|DEVICE|LIMIT)(?: (-?\d+))?)?$/.exec(line);
     if (!match) return false;

@@ -25,12 +25,12 @@ test('transport accepts split and batched protocol messages', { timeout: 5000 },
   await closing;
 });
 
-for (const mode of ['exit', 'crash', 'oversize', 'garbage', 'duplicate', 'device']) {
+for (const mode of ['exit', 'crash', 'oversize', 'garbage', 'duplicate', 'device', 'decoder-timeout']) {
   test(`transport contains ${mode} failures`, { timeout: 5000 }, async t => {
     const { engine, failed } = session(t, mode);
     engine.play(1, 'ignored', 1);
     const error = await failed;
-    assert.equal(error.code, mode === 'device' ? 'DEVICE_ERROR' : 'ENGINE_ERROR');
+    assert.equal(error.code, mode === 'device' ? 'DEVICE_ERROR' : mode === 'decoder-timeout' ? 'TIMEOUT' : 'ENGINE_ERROR');
     await engine.close();
   });
 }

@@ -26,7 +26,7 @@ for (const mode of ['seek', 'fail-seek', 'fail-read', 'unknown-length']) {
     data.fill(0, 44, 44 + 48000); // Silence until 0.5 seconds, then tone.
     await writeFile(path, data);
     const { stdout } = await promisify(execFile)(resolve(`.tmp/playsound-render-test${process.platform === 'win32' ? '.exe' : ''}`),
-      [Buffer.from(path).toString('hex'), mode], { windowsHide: true });
+      [Buffer.from(path).toString('hex'), mode], { windowsHide: true, timeout: 8000 });
     if (mode === 'seek') assert.match(stdout, /SEEK_PCM_OK/);
     else {
       assert.match(stdout, /ERROR 1 DECODE -\d+/);
@@ -35,6 +35,30 @@ for (const mode of ['seek', 'fail-seek', 'fail-read', 'unknown-length']) {
     }
   });
 }
+
+for (const rate of [48000, 24000]) for (const mode of ['seek-refill', 'close-refill', 'stale-error']) {
+  test(`native: bounded streaming workers preserve PCM and lifetime (${mode}, ${rate} Hz)`, { timeout: 10000 }, async t => {
+    const { path } = await fixture(t, 4);
+    const data = wav(4);
+    data.writeUInt32LE(rate, 24);
+    data.writeUInt32LE(rate * 2, 28); // Exercise conversion from mono at another sample rate.
+    for (let frame = 0; frame < 48000 * 4; frame++) data.writeInt16LE((frame * 137 % 65536) - 32768, 44 + frame * 2);
+    await writeFile(path, data);
+    const { stdout } = await promisify(execFile)(resolve(`.tmp/playsound-render-test${process.platform === 'win32' ? '.exe' : ''}`),
+      [Buffer.from(path).toString('hex'), mode], { windowsHide: true, timeout: 8000 });
+    assert.match(stdout, /STREAM_OK/);
+  });
+}
+
+test('native: a stalled background decoder exits with a bounded timeout', { timeout: 15000 }, async t => {
+  const { path } = await fixture(t, 1);
+  await assert.rejects(promisify(execFile)(resolve(`.tmp/playsound-render-test${process.platform === 'win32' ? '.exe' : ''}`),
+    [Buffer.from(path).toString('hex'), 'stall'], { windowsHide: true, timeout: 13000 }), error => {
+    assert.equal(error.code, 3);
+    assert.match(error.stdout, /FATAL TIMEOUT 0/);
+    return true;
+  });
+});
 
 async function engine(t) {
   const child = spawn(binary, ['--null', '--parent', String(process.pid)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
