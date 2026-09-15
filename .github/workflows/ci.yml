@@ -75,3 +75,21 @@ jobs:
           name: npm-package
           path: '*.tgz'
           if-no-files-found: error
+  sanitize:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - run: npm run build:test-native
+        env:
+          CC: clang
+          CFLAGS_JSON: '["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]'
+      - name: Verify native PCM, failures, and concurrent buffer ownership
+        run: node --test --test-name-pattern='decoded PCM|seeking PCM|bounded streaming' test/native.test.mjs
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
