@@ -25,6 +25,15 @@ export type EngineFactory = (
 
 const supported = new Set(['win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64']);
 
+/** Translate native crash statuses without changing the public error code. */
+export function exitMessage(code: number | null, signal: string | null): string {
+  if (signal === 'SIGILL' || (code !== null && (code >>> 0) === 0xc000001d)) {
+    return `Audio engine crashed with an illegal CPU instruction (${signal ?? '0xC000001D'}). ` +
+      'The bundled executable may require CPU features unavailable on this machine. Update node-playsound or report the platform to its maintainers.';
+  }
+  return `Audio engine exited unexpectedly (${signal ?? code}).`;
+}
+
 export function executable(platform = process.platform, arch = process.arch): string {
   const target = `${platform}-${arch}`;
   if (!supported.has(target)) {
@@ -61,7 +70,7 @@ export class Session implements Engine {
         this.#exited = true;
         clearTimeout(this.#startup);
         clearTimeout(this.#killTimer);
-        if (!this.#closing) this.fail(new AudioError('ENGINE_ERROR', `Audio engine exited unexpectedly (${signal ?? code}).${this.#stderr ? ` ${this.#stderr}` : ''}`));
+        if (!this.#closing) this.fail(new AudioError('ENGINE_ERROR', `${exitMessage(code, signal)}${this.#stderr ? ` ${this.#stderr}` : ''}`));
         resolve();
       });
     });
