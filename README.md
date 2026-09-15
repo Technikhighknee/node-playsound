@@ -4,11 +4,8 @@ Play local audio from Node.js. TypeScript, ESM, zero runtime dependencies.
 WAV, MP3, and FLAC decoding and playback are bundled—no external player,
 compiler, installation script, or extra download on the user's machine.
 
-> Pre-release source. This repository has not been published. Install the
-> verified `.tgz` produced by CI; see [release instructions](docs/development.md).
-
 ```sh
-npm install ./node-playsound-0.1.0.tgz
+npm install node-playsound
 ```
 
 ```ts
