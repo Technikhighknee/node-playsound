@@ -21,6 +21,7 @@ function setup(t, options) {
       play(...args) { this.calls.push(['play', ...args]); },
       stop(id) { this.calls.push(['stop', id]); },
       volume(...args) { this.calls.push(['volume', ...args]); },
+      seek(...args) { this.calls.push(['seek', ...args]); },
       close() { this.closed++; return Promise.resolve(); },
       fail(error) { failed(error); },
     };
@@ -154,6 +155,72 @@ test('volume changed while pending is used for initial playback', async t => {
   p.volume = 0;
   assert.equal(engine.calls.length, 1);
   assert.throws(() => { p.volume = Infinity; }, RangeError);
+});
+
+test('seeks wait for startup, coalesce, and do not restart settled playback', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t);
+  const p = player.play(path);
+  for (const invalid of [-1, NaN, Infinity, -Infinity, null, '80', undefined])
+    assert.throws(() => p.seek(invalid), RangeError);
+  assert.equal(p.seek(20), undefined);
+  p.seek(80.25);
+  const engine = await started(1);
+  assert.equal(engine.calls.length, 1);
+  engine.event({ type: 'started', id: 1 });
+  assert.deepEqual(engine.calls.at(-1), ['seek', 1, 80.25]);
+  for (let i = 0; i < 10000; i++) p.seek(i);
+  assert.equal(engine.calls.length, 2);
+  engine.event({ type: 'seeked', id: 1 });
+  assert.deepEqual(engine.calls.at(-1), ['seek', 1, 9999]);
+  p.stop();
+  const count = engine.calls.length;
+  p.seek(0);
+  engine.event({ type: 'seeked', id: 1 });
+  assert.equal(engine.calls.length, count);
+  engine.event({ type: 'done', id: 1, reason: 'stopped' });
+  await p.finished;
+  p.seek(0);
+  assert.throws(() => p.seek(-1), RangeError);
+  assert.equal(engine.calls.length, count);
+});
+
+test('seek deadlines are not extended by repeated requests and fail the isolated engine', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t);
+  const a = player.play(path); const b = player.play(path);
+  const checked = [a, b].map(p => assert.rejects(p.finished, { code: 'TIMEOUT' }));
+  const engine = await started(2);
+  engine.event({ type: 'started', id: 1 });
+  engine.event({ type: 'started', id: 2 });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  a.seek(80);
+  t.mock.timers.tick(9999);
+  a.seek(0);
+  t.mock.timers.tick(1);
+  await Promise.all(checked);
+  a.seek(2); b.seek(2);
+});
+
+test('seek acknowledgments cannot erase stop deadlines, and close ignores seeks', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t);
+  const p = player.play(path);
+  const checked = assert.rejects(p.finished, { code: 'TIMEOUT' });
+  const engine = await started(1);
+  engine.event({ type: 'started', id: 1 });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  p.seek(2);
+  p.stop();
+  engine.event({ type: 'seeked', id: 1 });
+  t.mock.timers.tick(2000);
+  await checked;
+  const q = player.play(path);
+  q.seek(80);
+  const closing = player.close();
+  q.seek(0);
+  await closing;
+  assert.equal(await q.finished, 'stopped');
 });
 
 test('one decoder failure does not stop unrelated audio', async t => {

@@ -24,7 +24,7 @@ chmodSync(output, 0o755);
 // Some Windows compilers emit a sidecar even when debug information is off.
 rmSync(output.replace(/\.exe$/, '') + '.pdb', { force: true });
 writeFileSync(test ? `${output}.json` : resolve(directory, 'manifest.json'), JSON.stringify({
-  protocol: 1, platform, arch, sourceSha256: sourceHash(),
+  protocol: 2, platform, arch, sourceSha256: sourceHash(),
   ...(render ? { renderSha256: createHash('sha256').update(readFileSync('test/render.c')).digest('hex') } : {}),
   binarySha256: createHash('sha256').update(readFileSync(output)).digest('hex'),
 }, null, 2) + '\n');

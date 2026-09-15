@@ -42,8 +42,11 @@ Volume updates are coalesced while the command channel is backpressured.
 Commands have bounded length; response frames are limited to 256 characters,
 queued commands to 40 MiB, and diagnostics to the last 2 KiB.
 
-Stopping a command still buffered in Node cancels it without creating a native
-voice. Otherwise the engine acknowledges destruction. A stuck stop fails the
+Stopping a play command still buffered in Node cancels it without creating a native
+voice. Stop also removes that voice's unwritten seek and volume commands, even
+when its play command has already been written. Bytes accepted by the pipe
+cannot be recalled; those commands retain their order. Otherwise the engine
+acknowledges destruction. A stuck stop fails the
 engine after two seconds, so affected peers receive explicit failure instead
 of continuing with uncertain state. Startup is bounded to ten seconds.
 There is no arbitrary time limit on a successfully playing recording;
@@ -75,10 +78,61 @@ speaker. Volume is linear gain; mixing multiple full-volume files can clip.
 Use lower gains when layering loud recordings. Device changes may fail active
 plays rather than transparently migrating them.
 
-There is no pause, seek, network streaming, device selector, effects graph,
+There is no pause, network streaming, device selector, effects graph,
 global volume, or scheduling API. Additions should justify their lifecycle
 and portability costs. Codec support is explicit rather than delegated to
 whatever software happens to be installed.
+
+## Seeking
+
+`Playback.seek(seconds)` follows volume's command/error model: no extra
+promise or public event stream. The controller keeps one in-flight seek and
+one latest pending target per voice. It dispatches after `STARTED`, bounds
+each operation to ten seconds, and ignores late acknowledgments during stop
+or close. The existing completion gate handles natural-end and failure races.
+
+Protocol 2 adds `Q id seconds` and `SEEKED id`. Older helpers fail the startup
+handshake instead of silently ignoring a new command. The native main thread
+converts seconds using the decoded output sample rate, checks the cached length, and
+ends beyond-end requests before any unsafe floating-point-to-integer cast.
+Unknown lengths fail explicitly instead of guessing a boundary.
+
+The unmodified miniaudio header supplies public `ma_decoder` and
+`ma_data_source` APIs. Each voice owns a decoder and a 16,384-frame stereo
+float PCM ring (128 KiB, independent of file duration). Two reusable workers
+serve voices round-robin, with at most one job per decoder. Initial opening,
+length discovery, and priming run on the main thread before registration;
+subsequent reads and seeks run outside both the pool mutex and PCM lock.
+Decoding converts to the engine sample rate, so seek targets and cached
+lengths use that same frame domain.
+
+The mixer only copies buffered PCM. It tries the PCM lock once and returns
+`MA_BUSY` on contention, starvation, or a pending seek, allowing other voices
+to keep mixing without disk access, allocation, or waiting. A seek clears the
+buffer and advances a generation. A refill already running may finish, but
+its stale samples and EOF are discarded; actual errors are never discarded.
+Acknowledgment follows successful decoder seek and first refill, not command
+submission. No private miniaudio fields or patched resource-manager behavior
+are involved; the unused resource manager is compiled out.
+
+This adds a small streaming implementation to maintain, with explicit tests
+for its buffer and ownership rules. Decoding on the mixer would let slow I/O
+stall every voice; a thread per voice would make thread counts scale with
+concurrency. Intercepting resource-manager internals would preserve the vendor
+coupling and incomplete error reporting that this design removes. The fixed
+pool bounds threads and memory, though two blocked decoders can starve all
+voices until timeout; it does not promise real-time disk performance.
+
+Destruction first detaches the sound from the mixer, then removes the stream
+from the pool and waits for its current job before freeing the decoder and
+buffer. A decoder error destroys only its voice. A background job exceeding
+ten seconds terminates the isolated helper with `TIMEOUT`; Node's existing
+seek and two-second stop/close deadlines also bound stuck work. Safe in-process
+cancellation of arbitrary decoder I/O is not assumed.
+
+Position and duration are not exposed: buffered playback and device latency
+make a synchronous cursor easy to misinterpret, and duration can be unknown.
+The public feature remains a single `seek(seconds): void` method.
 
 ## Evidence
 

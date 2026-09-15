@@ -38,6 +38,7 @@ There is no implicit queue when the concurrency limit is reached.
 | `state` | Read-only: `pending`, `playing`, `stopping`, `ended`, `stopped`, or `failed` |
 | `volume` | Read/write gain; applies to this play only |
 | `stop()` | Idempotent; returns the same promise as `finished` |
+| `seek(seconds)` | Requests an absolute position; returns `void`; failures reject `finished` |
 | `[Symbol.asyncDispose]()` | Stops and awaits completion |
 
 `pending` includes file validation and engine startup. `playing` means the
@@ -55,6 +56,47 @@ failure returns the already-rejected completion promise.
 Always observe `finished`. Ignoring a rejected completion promise follows
 Node's ordinary unhandled-rejection behavior; the library does not silently
 discard audio failures or add global rejection handlers.
+
+### Seeking
+
+```ts
+const playback = play('./track.mp3');
+playback.seek(80); // Absolute seconds from the beginning; fractions are allowed.
+await playback.finished;
+```
+
+Seeking changes only this playhead, preserving volume and cancellation. It
+does not create a new playback or change `finished`. The operation is
+asynchronous; `seek()` does not acknowledge audible arrival at the target.
+Keep observing `finished` for errors, as with volume changes.
+
+- Positions must be finite, nonnegative numbers; invalid values always throw
+  `RangeError`, even after completion. Zero seeks to the beginning.
+- Before startup finishes, the latest target is retained and sent when the
+  engine starts the voice. Some initial audio may play before it takes effect;
+  this is not a scheduled start-offset API.
+- At most one seek per playback is in flight. Further requests replace a
+  single pending target. Intermediate positions may be skipped; an in-flight
+  seek is not interrupted. Repeated requests cannot extend its ten-second deadline.
+- At or beyond the known duration, seeking ends that playback and resolves
+  `finished` with `ended`. Natural completion can win a race with seeking,
+  including a newer request; seeking never revives a completed voice.
+- After stopping begins, completion, failure, or player closure, valid seeks
+  have no effect. Stop, abort, and close retain their existing behavior and deadlines.
+- Streamed WAV, MP3, and FLAC support seeking when their decoder supplies a
+  known length and supports the target. Unknown length or a failed seek/refill
+  fails that playback with `DECODE_ERROR`. A stuck seek or background decoder operation fails its engine after
+  ten seconds with `TIMEOUT`, rejecting its other active plays too. Device and
+  process failures retain their existing error codes and scope.
+
+Positions are converted to whole PCM frames at the engine sample rate. Decoding and output
+buffering can introduce a short delay, silence, or buffered audio from the
+old position. Stop removes unwritten seek commands from Node's queue; a seek
+already written to the pipe may run before the stop is processed.
+There is no sample-accurate or gapless-seeking guarantee.
+MP3 seeking may require decoding earlier frames and can be slower on long files.
+Position and duration getters are deliberately absent: the decoder cursor can
+lead audible output, and some streams have no reliable length.
 
 ```ts
 import { play, AudioError } from 'node-playsound';
@@ -101,13 +143,13 @@ message, and a `cause` chain where available. Do not parse message text.
 | Code | Meaning / action |
 | --- | --- |
 | `FILE_ERROR` | Missing, unreadable, or non-regular file; check the path and permissions |
-| `DECODE_ERROR` | Decoder could not open/read the audio; check format and file integrity |
+| `DECODE_ERROR` | Decoder could not open/read/seek the audio, or seeking has no known length |
 | `DEVICE_ERROR` | No usable audio session/device, or device stopped; check system audio |
 | `ENGINE_ERROR` | Missing executable, permissions, process failure, or protocol failure; reinstall/check deployment |
 | `UNSUPPORTED_PLATFORM` | No bundled executable for this OS/architecture |
 | `PLAYBACK_LIMIT` | Wait for or stop a play, or deliberately increase the player's limit |
 | `PLAYER_CLOSED` | Construct a new player |
-| `TIMEOUT` | Startup exceeded 10 seconds or stopping exceeded 2 seconds |
+| `TIMEOUT` | Startup, a seek, or background decoding exceeded 10 seconds, or stopping exceeded 2 seconds |
 
 A file can change between Node's validation and the native open. Such
 failures may surface as `DECODE_ERROR`. Valid empty/truncated files may fail
