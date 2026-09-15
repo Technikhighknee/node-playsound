@@ -1,5 +1,7 @@
 # Design
 
+[Documentation](../README.md#documentation) · [API reference](api.md)
+
 The public abstraction is a playback, not an operating-system process.
 A handle represents exactly one play; a sound is reusable path/configuration;
 a player is the ownership and concurrency boundary.

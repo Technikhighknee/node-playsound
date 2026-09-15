@@ -1,5 +1,7 @@
 # Release candidate validation
 
+[Documentation](../README.md#documentation) · [API reference](api.md)
+
 Recorded on 2026-09-15. This is an unpublished npm release candidate;
 automated platform validation does not imply physical hardware validation.
 
