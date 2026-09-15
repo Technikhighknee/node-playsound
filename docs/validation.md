@@ -2,6 +2,21 @@
 
 [Documentation](../README.md#documentation) · [API reference](api.md)
 
+## Published 0.1.0 compatibility finding
+
+On 2026-09-16, the npm Windows x64 helper crashed before `READY` on an AMD
+Ryzen 5 5600X with `0xC000001D`. A debugger located an AVX-512 instruction in
+the distributed executable. The same file played with the baseline-built
+helper. The published binary and locally tested binary had different hashes;
+CI had tested its own CPU-specific build on a CPU that supported it.
+
+The earlier successful matrix below therefore does **not** establish CPU
+portability of 0.1.0. The corrective source explicitly selects a baseline and
+rejects globally enabled AVX features in x64 builds. A new npm release is
+needed to replace the defective distributed build.
+
+## Earlier validation record
+
 Recorded on 2026-09-15. This is an unpublished npm release candidate;
 automated platform validation does not imply physical hardware validation.
 

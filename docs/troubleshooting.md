@@ -88,6 +88,15 @@ do not configure an unrelated external player.
 [support table](../README.md#support); Linux builds require glibc 2.35 or newer
 and do not support Alpine/musl. This package is for Node, not browser bundles.
 
+## Illegal CPU instruction on Windows
+
+Exit status `3221225501` is Windows `0xC000001D` (illegal instruction). Version
+0.1.0's Windows helper could require CPU features of the CI build machine and
+crash on another CPU before audio starts. This is a binary-build defect, not
+an error in the playback call or file. Reinstalling the same 0.1.0 archive does
+not fix it; use a release containing the portable-CPU build fix. Newer source
+also explains this status in the `ENGINE_ERROR` message.
+
 ## Limits, timeouts, and cleanup
 
 | Symptom | What to check |
