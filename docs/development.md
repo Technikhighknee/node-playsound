@@ -45,6 +45,19 @@ use a desktop session with audio enabled. An optional filename can follow
 device initialization and completion; someone should also listen on each
 supported platform before a public release.
 
+## Portable CPU targets
+
+Native builds select a CPU baseline explicitly. Zig uses `-mcpu=baseline`;
+GCC/Clang use `-march=x86-64` or `-march=armv8-a`. These flags apply to both
+production and test engines. Do not replace them with host-specific tuning.
+Zig otherwise defaults to the build machine's CPU, so a binary can pass CI
+and crash on a consumer machine with fewer instruction-set extensions.
+
+The native x64 entry point rejects compilation with AVX/AVX2/AVX-512 enabled
+as a global requirement. Optional SIMD optimizations belong behind runtime
+feature detection. Baseline changes require rebuilding every distributed
+binary; source hashes prevent mixing the old and new builds.
+
 ## Distribution
 
 The six-platform CI matrix builds and tests each native executable on its own

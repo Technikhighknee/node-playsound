@@ -1,4 +1,9 @@
 /* SPDX-License-Identifier: CC0-1.0 */
+/* Optional x86 vector features must be selected by runtime dispatch, never
+   required by the executable itself. Catch accidental host-CPU builds. */
+#if defined(__x86_64__) && (defined(__AVX__) || defined(__AVX2__) || defined(__AVX512F__))
+#error "Build the distributed audio engine for the baseline CPU, not the build host."
+#endif
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #endif

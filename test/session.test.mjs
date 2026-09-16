@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { resolve, join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { setImmediate as turn } from 'node:timers/promises';
-import { Session, executable } from '../dist/session.js';
+import { Session, executable, exitMessage } from '../dist/session.js';
 import { Controller } from '../dist/player.js';
 import { fixture } from './fixtures.mjs';
 
@@ -15,6 +15,16 @@ function session(t, mode) {
   t.after(() => engine.close());
   return { engine, events, failed };
 }
+
+test('native illegal-instruction crashes explain CPU compatibility', () => {
+  for (const code of [0xc000001d, -1073741795]) {
+    assert.match(exitMessage(code, null), /illegal CPU instruction \(0xC000001D\)/);
+    assert.match(exitMessage(code, null), /CPU features unavailable/);
+  }
+  assert.match(exitMessage(null, 'SIGILL'), /illegal CPU instruction \(SIGILL\)/);
+  assert.equal(exitMessage(17, null), 'Audio engine exited unexpectedly (17).');
+  assert.equal(exitMessage(null, 'SIGTERM'), 'Audio engine exited unexpectedly (SIGTERM).');
+});
 
 test('transport accepts split and batched protocol messages', { timeout: 5000 }, async t => {
   const { engine, events } = session(t, 'normal');

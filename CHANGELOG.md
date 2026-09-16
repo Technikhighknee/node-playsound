@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Fix Windows native engines built with optional features of the CI host CPU,
+  which could crash on other machines with `0xC000001D` before playback started.
+  Native builds now select a portable CPU baseline, and x64 compilation rejects
+  accidental AVX requirements.
+- Explain illegal-instruction engine crashes while preserving `ENGINE_ERROR`.
+
 ## 0.1.0
 
 Initial release:

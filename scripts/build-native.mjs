@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, chmodSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { sourceHash } from './native-manifest.mjs';
 
@@ -15,7 +15,14 @@ const compiler = process.env.CC ?? (process.platform === 'win32' ? 'clang' : 'cc
 const flags = JSON.parse(process.env.CFLAGS_JSON ?? '[]');
 if (!Array.isArray(flags) || !flags.every(flag => typeof flag === 'string')) throw new Error('CFLAGS_JSON must be an array of arguments.');
 if (!test && flags.some(flag => flag.includes('PLAYSOUND_TEST'))) throw new Error('The test backend cannot be enabled in production builds.');
-const args = [...flags, '-std=c11', '-O2', '-g0', '-DNDEBUG', ...(test ? ['-DPLAYSOUND_TEST'] : []),
+if (!['x64', 'arm64'].includes(arch)) throw new Error(`Unsupported native architecture: ${arch}`);
+// zig cc otherwise targets the build host's CPU, including optional features
+// that consumer machines may not support. Set the baseline for every build,
+// including tests, and apply it after caller flags so -mcpu=native cannot win.
+const cpuFlags = /^zig(?:\.exe)?$/i.test(basename(compiler))
+  ? ['-mcpu=baseline']
+  : [arch === 'x64' ? '-march=x86-64' : '-march=armv8-a'];
+const args = [...flags, ...cpuFlags, '-std=c11', '-O2', '-g0', '-DNDEBUG', ...(test ? ['-DPLAYSOUND_TEST'] : []),
   render ? 'test/render.c' : 'native/player.c', '-o', output, ...(platform === 'win32' ? [] : ['-lpthread', '-lm', ...(platform === 'linux' ? ['-ldl'] : [])])];
 const result = spawnSync(compiler, args, { stdio: 'inherit', windowsHide: true });
 if (result.error) throw result.error;
