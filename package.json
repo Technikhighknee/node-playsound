@@ -1,7 +1,7 @@
 {
   "name": "node-playsound",
-  "version": "0.1.1",
-  "description": "Local audio playback for Node.js. Concurrent sounds, volume, cancellation, and bundled native decoding.",
+  "version": "0.1.2",
+  "description": "Play WAV, MP3, and FLAC files from Node.js on Windows, macOS, and Linux. Concurrent playback, seeking, and volume control with zero runtime dependencies.",
   "type": "module",
   "license": "CC0-1.0",
   "repository": { "type": "git", "url": "git+https://github.com/Technikhighknee/node-playsound.git" },
@@ -13,7 +13,7 @@
   "types": "./dist/index.d.ts",
   "files": ["dist", "bin/*/playsound", "bin/*/playsound.exe", "bin/*/manifest.json", "docs", "examples", "LICENSE", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md"],
   "sideEffects": false,
-  "keywords": ["audio", "sound", "play", "mp3", "wav", "flac", "typescript"],
+  "keywords": ["nodejs", "audio", "audio-playback", "audio-player", "sound", "play-sound", "mp3", "wav", "flac", "typescript", "esm", "cross-platform", "zero-dependencies"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -1,5 +1,9 @@
 # node-playsound
 
+[![npm version](https://img.shields.io/npm/v/node-playsound.svg)](https://www.npmjs.com/package/node-playsound)
+[![Build and verify](https://github.com/Technikhighknee/node-playsound/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/Technikhighknee/node-playsound/actions/workflows/ci.yml?query=branch%3Amaster)
+[![License: CC0-1.0](https://img.shields.io/badge/license-CC0--1.0-blue.svg)](LICENSE)
+
 Play local audio from Node.js with one import. TypeScript, ESM, and zero runtime
 npm dependencies. WAV, MP3, and FLAC decoding is bundled for Windows, macOS, and
 Linux—no external player, install-time compiler, or extra download.
