@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Improve the package description and discovery keywords.
+- Add npm version, build status, and license badges to the README.
+- No changes to playback behavior or the public API.
+
 ## 0.1.1
 
 - Fix Windows native engines built with optional features of the CI host CPU,
