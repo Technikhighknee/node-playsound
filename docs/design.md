@@ -185,6 +185,30 @@ A synchronous position getter would conceal IPC staleness or require permanent
 polling. An event stream would create traffic even without readers. A single explicit
 snapshot keeps these costs bounded and lets applications choose their UI update rate.
 
+### Protocol 3 summary
+
+Only the native main thread writes responses. The mixer performs no IPC. Tokens
+are positive, safe JavaScript integers, echoed as decimal uint64 values; exhaustion
+fails explicitly rather than reusing a live generation.
+
+| Request | Response / effect |
+| --- | --- |
+| `P id volume hexpath` / `B id volume hexpath` | `STARTED id`; starts playing / paused |
+| `A id token 0-or-1` | `PAUSED id token 0-or-1`; resumes / pauses |
+| `Q id seconds token` | `SEEKED id token` after decoder seek and first refill |
+| `T id token` | `TIMING id token position duration`; `-` means unknown duration |
+| `V id volume` | Changes gain; no acknowledgment |
+| `S id` | `DONE id stopped` after destruction |
+
+Existing `DONE`, `ERROR`, `FATAL`, and `QUIT` lifecycle messages remain. Natural
+completion can replace a requested acknowledgment. Position uses round-trippable
+seconds derived from the output-frame cursor. The parser rejects nonfinite,
+negative, oversized, or structurally invalid timing messages. Main-thread snapshots
+hold only the short PCM lock. Frame counter overflow fails decoding instead of
+wrapping. The sound disables pitch conversion because PCM already uses the engine
+sample rate; the stream cursor still intentionally measures mixer input rather
+than downstream presentation time.
+
 ## Evidence
 
 - [Miniaudio manual and platform backend/build information](https://miniaud.io/docs/manual/index.html)
