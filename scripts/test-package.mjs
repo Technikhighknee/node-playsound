@@ -62,6 +62,14 @@ const pauseResult: void = playback.pause();
 const resumeResult: void = playback.resume();
 const timing: Promise<PlaybackTiming | null> = playback.getTiming();
 void pauseResult; void resumeResult; void timing;
+const snapshot = await timing;
+if (snapshot) {
+  const seconds: number = snapshot.position;
+  const duration: number | null = snapshot.duration;
+  void seconds; void duration;
+  // @ts-expect-error snapshots are read-only
+  snapshot.position = 10;
+}
 void playback.stop();
 void result;
 void sound('tone.wav').play();

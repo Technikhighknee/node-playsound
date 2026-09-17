@@ -28,7 +28,7 @@ test('native illegal-instruction crashes explain CPU compatibility', () => {
 
 test('transport accepts split and batched protocol messages', { timeout: 5000 }, async t => {
   const { engine, events } = session(t, 'normal');
-  engine.play(1, 'a\n" & Ã©Å¸Â³.wav', 0.5);
+  engine.play(1, 'a\n" & ÃƒÂ©Ã…Â¸Ã‚Â³.wav', 0.5);
   while (events.length < 2) await turn();
   assert.deepEqual(events, [{ type: 'started', id: 1 }, { type: 'done', id: 1, reason: 'ended' }]);
   const closing = engine.close();
@@ -65,7 +65,9 @@ test('unresponsive startup is bounded', { timeout: 5000 }, async t => {
 
 test('stop cancels buffered playback without waiting for engine readiness', { timeout: 5000 }, async t => {
   const { engine, events } = session(t, 'hang');
-  engine.play(1, 'unused', 1);
+  engine.play(1, 'unused', 1, true);
+  engine.pause(1, 1, false);
+  engine.timing(1, 2);
   engine.volume(1, 0.2);
   engine.stop(1);
   assert.deepEqual(events, [{ type: 'done', id: 1, reason: 'stopped' }]);

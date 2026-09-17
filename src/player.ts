@@ -40,7 +40,7 @@ export interface Playback extends AsyncDisposable {
   pause(): void;
   /** Resume without rewinding. Harmless unless pause was requested. */
   resume(): void;
-  /** On-demand native snapshot after earlier controls; null if playback has settled. */
+  /** On-demand native snapshot. Overlapping calls share it; null after settlement. */
   getTiming(): Promise<PlaybackTiming | null>;
 }
 export interface Sound {

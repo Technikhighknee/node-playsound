@@ -282,3 +282,12 @@ for (const command of ['A 1 0 1', 'A 1 1 2', 'A 1 1 1 extra', 'T 1 9007199254740
     assert.equal((await p.closed)[0], 2);
   });
 }
+
+test('native: seeking beyond duration ends a paused voice without resuming', { timeout: 5000 }, async t => {
+  const { path } = await fixture(t, 1);
+  const p = await engine(t);
+  p.send(`B 1 0 ${Buffer.from(path).toString('hex')}`);
+  assert.equal(await p.next(), 'STARTED 1');
+  p.send('Q 1 1.7976931348623157e+308 1');
+  assert.equal(await p.next(), 'DONE 1 ended');
+});
