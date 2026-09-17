@@ -19,12 +19,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <inttypes.h>
 
 #define MAX_VOICES 256
 #define MAX_LINE 131200
 #include "platform.h"
 #include "stream.h"
-typedef struct { unsigned id; ma_sound sound; ps_stream stream; int seeking; } voice;
+typedef struct { unsigned id; ma_sound sound; ps_stream stream; uint64_t seeking; } voice;
 static voice voices[MAX_VOICES];
 static char mailbox[MAX_LINE];
 static ma_mutex inbox_lock;
@@ -126,9 +127,9 @@ static int command(ma_engine* engine, char* line)
     if (sscanf(line, "%c %u", &op, &id) != 2 || !id) return -1;
     voice* v = NULL;
     for (int i = 0; i < MAX_VOICES; ++i) if (voices[i].id == id) v = &voices[i];
-    if (op == 'P') {
+    if (op == 'P' || op == 'B') {
         char path[65537];
-        if (v || sscanf(line, "P %u %f %n", &id, &volume, &offset) != 2 || !offset ||
+        if (v || sscanf(line, "%c %u %f %n", &op, &id, &volume, &offset) != 3 || !offset ||
             !isfinite(volume) || volume < 0 || volume > 1) return -1;
         line[strcspn(line, "\r\n")] = 0;
         if (!unhex(path, line + offset)) return -1;
@@ -136,7 +137,7 @@ static int command(ma_engine* engine, char* line)
         if (!v) { printf("ERROR %u LIMIT 0\n", id); return 1; }
         ma_result result = stream_init(&v->stream, path, ma_engine_get_sample_rate(engine));
         if (result != MA_SUCCESS) { printf("ERROR %u DECODE %d\n", id, result); return 1; }
-        result = ma_sound_init_from_data_source(engine, &v->stream, MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, &v->sound);
+        result = ma_sound_init_from_data_source(engine, &v->stream, MA_SOUND_FLAG_NO_SPATIALIZATION | MA_SOUND_FLAG_NO_PITCH, NULL, &v->sound);
         if (result != MA_SUCCESS) {
             stream_uninit(&v->stream);
             printf("ERROR %u DEVICE %d\n", id, result); return 1;
@@ -146,7 +147,8 @@ static int command(ma_engine* engine, char* line)
             printf("ERROR %u LIMIT 0\n", id); return 1;
         }
         ma_sound_set_volume(&v->sound, volume);
-        result = ma_sound_start(&v->sound);
+        stream_pause(&v->stream, op == 'B');
+        result = op == 'B' ? MA_SUCCESS : ma_sound_start(&v->sound);
         if (result != MA_SUCCESS) {
             ma_sound_uninit(&v->sound);
             stream_uninit(&v->stream);
@@ -158,9 +160,11 @@ static int command(ma_engine* engine, char* line)
         printf("STARTED %u\n", id);
     } else if (op == 'Q') {
         double seconds;
+        uint64_t token;
         ma_uint32 rate;
         ma_uint64 length;
-        if (sscanf(line, "Q %u %lf %c", &id, &seconds, &extra) != 2 || !isfinite(seconds) || seconds < 0) return -1;
+        if (sscanf(line, "Q %u %lf %" SCNu64 " %c", &id, &seconds, &token, &extra) != 3 || !isfinite(seconds) || seconds < 0 ||
+            !token || token > 9007199254740991ULL) return -1;
         if (!v) return 1; /* Natural completion may have won the command race. */
         if (v->seeking) return -1; /* Controller permits one in-flight seek. */
         ma_result result = ma_sound_get_data_format(&v->sound, NULL, NULL, &rate, NULL, 0);
@@ -179,7 +183,40 @@ static int command(ma_engine* engine, char* line)
         if (result != MA_SUCCESS) {
             ma_sound_uninit(&v->sound); stream_uninit(&v->stream); v->id = 0; v->seeking = 0;
             printf("ERROR %u DECODE %d\n", id, result);
-        } else v->seeking = 1;
+        } else v->seeking = token;
+    } else if (op == 'A' || op == 'T') {
+        uint64_t token;
+        int paused = 0;
+        if (op == 'A') {
+            if (sscanf(line, "A %u %" SCNu64 " %d %c", &id, &token, &paused, &extra) != 3 ||
+                (paused != 0 && paused != 1)) return -1;
+        } else if (sscanf(line, "T %u %" SCNu64 " %c", &id, &token, &extra) != 2) return -1;
+        if (!token || token > 9007199254740991ULL) return -1;
+        if (!v) return 1;
+        /* EOF already observed by the mixer wins; resume must not rewind it. */
+        if (ma_sound_at_end(&v->sound)) { finish(v, "ended"); return 1; }
+        if (op == 'A') {
+            if (paused) stream_pause(&v->stream, 1);
+            /* Public node API resumes without ma_sound_start's EOF rewind.
+               EOF racing this operation remains terminal on the next poll. */
+            ma_result result = ma_node_set_state(&v->sound, paused ? ma_node_state_stopped : ma_node_state_started);
+            if (result != MA_SUCCESS) {
+                ma_sound_uninit(&v->sound); stream_uninit(&v->stream); v->id = 0; v->seeking = 0;
+                printf("ERROR %u DEVICE %d\n", id, result);
+                return 1;
+            }
+            if (!paused) stream_pause(&v->stream, 0);
+            printf("PAUSED %u %" PRIu64 " %d\n", id, token, paused);
+        } else {
+            if (v->seeking) return -1; /* Queries follow the seek acknowledgment. */
+            stream_lock(&v->stream);
+            ma_uint64 cursor = v->stream.cursor;
+            stream_unlock(&v->stream);
+            double position = (double)cursor / v->stream.rate;
+            if (v->stream.length)
+                printf("TIMING %u %" PRIu64 " %.17g %.17g\n", id, token, position, (double)v->stream.length / v->stream.rate);
+            else printf("TIMING %u %" PRIu64 " %.17g -\n", id, token, position);
+        }
     } else if (op == 'S') {
         if (sscanf(line, "S %u %c", &id, &extra) != 1) return -1;
         if (v) finish(v, "stopped");
@@ -209,8 +246,8 @@ static void poll_voices(void)
         } else if (ended) finish(v, "ended");
         else if (v->seeking && !atomic_load(&v->stream.seeking)) {
             if (atomic_load(&v->stream.error) != MA_SUCCESS) continue;
+            printf("SEEKED %u %" PRIu64 "\n", v->id, v->seeking);
             v->seeking = 0;
-            printf("SEEKED %u\n", v->id);
         }
     }
 }
@@ -256,7 +293,7 @@ int main(int argc, char** argv)
     result = ma_engine_init(&config, &engine);
     if (result != MA_SUCCESS) { printf("FATAL DEVICE %d\n", result); ma_context_uninit(&context); return 1; }
     if (!stream_pool_init()) { ma_engine_uninit(&engine); ma_context_uninit(&context); return 2; }
-    printf("READY 2\n");
+    printf("READY 3\n");
     while (running > 0) {
         int have_line;
         ma_mutex_lock(&inbox_lock);

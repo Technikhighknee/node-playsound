@@ -5,15 +5,19 @@ import { AudioError } from './errors.js';
 
 export type EngineEvent =
   | { type: 'started'; id: number }
-  | { type: 'seeked'; id: number }
+  | { type: 'seeked'; id: number; token: number }
+  | { type: 'paused'; id: number; token: number; paused: boolean }
+  | { type: 'timing'; id: number; token: number; position: number; duration: number | null }
   | { type: 'done'; id: number; reason: 'ended' | 'stopped' }
   | { type: 'error'; id: number; error: AudioError };
 
 export interface Engine {
-  play(id: number, path: string, volume: number): void;
+  play(id: number, path: string, volume: number, paused?: boolean): void;
+  pause(id: number, token: number, paused: boolean): void;
+  timing(id: number, token: number): void;
   stop(id: number): void;
   volume(id: number, volume: number): void;
-  seek(id: number, seconds: number): void;
+  seek(id: number, seconds: number, token: number): void;
   close(): Promise<void>;
   fail(error: AudioError): void;
 }
@@ -88,14 +92,14 @@ export class Session implements Engine {
     this.#startup = setTimeout(() => this.fail(new AudioError('TIMEOUT', 'The audio engine did not start within 10 seconds. Check the system audio device.')), 10_000);
   }
 
-  play(id: number, path: string, volume: number): void {
-    this.#send(`P${id}`, `P ${id} ${volume} ${Buffer.from(path).toString('hex')}\n`);
+  play(id: number, path: string, volume: number, paused = false): void {
+    this.#send(`P${id}`, `${paused ? 'B' : 'P'} ${id} ${volume} ${Buffer.from(path).toString('hex')}\n`);
   }
   stop(id: number): void {
     const queuedPlay = this.#queue.has(`P${id}`);
     // Cancel commands we still own, even when play has already entered the
     // pipe. Bytes accepted by stdin.write() cannot be recalled or reordered.
-    for (const key of [`P${id}`, `V${id}`, `Q${id}`]) {
+    for (const key of [`P${id}`, `V${id}`, `Q${id}`, `A${id}`, `T${id}`]) {
       this.#bytes -= this.#queue.get(key)?.length ?? 0;
       this.#queue.delete(key);
     }
@@ -104,7 +108,10 @@ export class Session implements Engine {
     } else this.#send(`S${id}`, `S ${id}\n`);
   }
   volume(id: number, volume: number): void { this.#send(`V${id}`, `V ${id} ${volume}\n`); }
-  seek(id: number, seconds: number): void { this.#send(`Q${id}`, `Q ${id} ${seconds}\n`); }
+  seek(id: number, seconds: number, token = 1): void { this.#send(`Q${id}`, `Q ${id} ${seconds} ${token}\n`); }
+
+  pause(id: number, token: number, paused: boolean): void { this.#send(`A${id}`, `A ${id} ${token} ${paused ? 1 : 0}\n`); }
+  timing(id: number, token: number): void { this.#send(`T${id}`, `T ${id} ${token}\n`); }
 
   #send(key: string, command: string): void {
     if (this.#closing) return;
@@ -143,7 +150,7 @@ export class Session implements Engine {
   }
 
   #line(line: string): boolean {
-    if (line === 'READY 2' && !this.#ready) {
+    if (line === 'READY 3' && !this.#ready) {
       this.#ready = true;
       clearTimeout(this.#startup);
       this.#flush();
@@ -158,12 +165,33 @@ export class Session implements Engine {
       return true;
     }
     if (!this.#ready) return false;
-    const match = /^(STARTED|SEEKED|DONE|ERROR) ([1-9]\d*)(?: (ended|stopped|FILE|DECODE|DEVICE|LIMIT)(?: (-?\d+))?)?$/.exec(line);
+    const seeked = /^SEEKED ([1-9]\d*) ([1-9]\d*)$/.exec(line);
+    if (seeked) {
+      const id = Number(seeked[1]), token = Number(seeked[2]);
+      if (!Number.isSafeInteger(id) || id > 0xffff_ffff || !Number.isSafeInteger(token)) return false;
+      this.#event({ type: 'seeked', id, token });
+      return true;
+    }
+    const control = /^(PAUSED|TIMING) ([1-9]\d*) ([1-9]\d*) (\S+)(?: (\S+))?$/.exec(line);
+    if (control) {
+      const id = Number(control[2]), token = Number(control[3]);
+      if (!Number.isSafeInteger(id) || id > 0xffff_ffff || !Number.isSafeInteger(token)) return false;
+      if (control[1] === 'PAUSED') {
+        if (control[5] !== undefined || !/^[01]$/.test(control[4]!)) return false;
+        this.#event({ type: 'paused', id, token, paused: control[4] === '1' });
+      } else {
+        const valid = (value: string | undefined): boolean => value !== undefined &&
+          /^(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/.test(value) && Number.isFinite(Number(value));
+        if (!valid(control[4]) || (control[5] !== '-' && !valid(control[5]))) return false;
+        this.#event({ type: 'timing', id, token, position: Number(control[4]), duration: control[5] === '-' ? null : Number(control[5]) });
+      }
+      return true;
+    }
+    const match = /^(STARTED|DONE|ERROR) ([1-9]\d*)(?: (ended|stopped|FILE|DECODE|DEVICE|LIMIT)(?: (-?\d+))?)?$/.exec(line);
     if (!match) return false;
     const id = Number(match[2]);
     if (!Number.isSafeInteger(id) || id > 0xffff_ffff) return false;
     if (match[1] === 'STARTED' && !match[3]) this.#event({ type: 'started', id });
-    else if (match[1] === 'SEEKED' && !match[3]) this.#event({ type: 'seeked', id });
     else if (match[1] === 'DONE' && (match[3] === 'ended' || match[3] === 'stopped') && !match[4])
       this.#event({ type: 'done', id, reason: match[3] });
     else if (match[1] === 'ERROR' && match[4] !== undefined) {

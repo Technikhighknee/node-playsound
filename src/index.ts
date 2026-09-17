@@ -3,7 +3,7 @@ import type { AudioFile, Playback, PlayOptions, PlayerOptions, Sound, SoundOptio
 
 export { AudioError } from './errors.js';
 export type { AudioErrorCode } from './errors.js';
-export type { AudioFile, Playback, PlaybackResult, PlaybackState, PlayOptions, PlayerOptions, Sound, SoundOptions } from './player.js';
+export type { AudioFile, Playback, PlaybackResult, PlaybackState, PlaybackTiming, PlayOptions, PlayerOptions, Sound, SoundOptions } from './player.js';
 
 /** An independent playback group with deterministic shutdown. Construct lazily. */
 export class Player implements AsyncDisposable {

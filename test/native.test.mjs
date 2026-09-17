@@ -68,7 +68,7 @@ async function engine(t) {
   let stderr = '';
   child.stderr.on('data', data => { stderr += data; });
   const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
-  assert.equal((await lines.next()).value, 'READY 2', stderr);
+  assert.equal((await lines.next()).value, 'READY 3', stderr);
   return { child, closed, next: async () => (await lines.next()).value, send: text => child.stdin.write(`${text}\n`) };
 }
 
@@ -99,12 +99,12 @@ for (const format of ['wav', 'mp3', 'flac']) {
     p.send(`P 1 0 ${Buffer.from(source).toString('hex')}`);
     assert.equal(await p.next(), 'STARTED 1');
     for (const seconds of [0.05, 0]) {
-      p.send(`Q 1 ${seconds}`);
-      assert.equal(await p.next(), 'SEEKED 1');
+      p.send(`Q 1 ${seconds} 1`);
+      assert.equal(await p.next(), 'SEEKED 1 1');
     }
-    p.send('Q 1 1.7976931348623157e+308');
+    p.send('Q 1 1.7976931348623157e+308 1');
     assert.equal(await p.next(), 'DONE 1 ended');
-    p.send('Q 1 0'); // Already completed: no resurrection or stale reply.
+    p.send('Q 1 0 1'); // Already completed: no resurrection or stale reply.
     p.send(`P 2 0 ${Buffer.from(path).toString('hex')}`);
     assert.equal(await p.next(), 'STARTED 2');
     p.send('S 2');
@@ -119,7 +119,7 @@ test('native: capacity exhaustion and repeated full batches release every voice'
   for (let batch = 0; batch < 2; batch++) {
     const base = batch * 300;
     for (let i = 1; i <= 256; i++) {
-      p.send(`P ${base + i} 0 ${encoded}`);
+      p.send(`${batch ? 'B' : 'P'} ${base + i} 0 ${encoded}`);
       assert.equal(await p.next(), `STARTED ${base + i}`);
     }
     p.send(`P ${base + 257} 0 ${encoded}`);
@@ -161,7 +161,7 @@ test('native: malformed commands fail closed', { timeout: 10000 }, async t => {
 for (const value of ['-1', 'nan', 'inf', '1 trailing']) {
   test(`native: malformed seek fails closed (${value})`, { timeout: 10000 }, async t => {
     const p = await engine(t);
-    p.send(`Q 1 ${value}`);
+    p.send(`Q 1 ${value} 1`);
     assert.equal((await p.closed)[0], 2);
   });
 }
@@ -240,3 +240,45 @@ test('native: cooperative worker shutdown also reaps the engine process', { time
   assert.equal((await exited)[0], 0);
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });
+
+test('native: offline pause timing proves cursor, seek, starvation, peers, and failure ownership', { timeout: 10000 }, async t => {
+  const { path } = await fixture(t, 3);
+  const { stdout } = await promisify(execFile)(resolve(`.tmp/playsound-render-test${process.platform === 'win32' ? '.exe' : ''}`),
+    [Buffer.from(path).toString('hex'), 'pause-timing'], { windowsHide: true, timeout: 8000 });
+  assert.match(stdout, /TIMING 1 1 0 3/);
+  assert.match(stdout, /TIMING 1 8 1.25 3/);
+  assert.match(stdout, /TIMING 1 8 0.25 3/);
+  assert.match(stdout, /TIMING 1 9 0.25 -/);
+  assert.match(stdout, /ERROR 1 DECODE/);
+  assert.match(stdout, /PAUSE_TIMING_OK/);
+});
+
+for (const format of ['wav', 'mp3', 'flac']) {
+  test(`native: paused ${format} reports duration, seeks, resumes, and ends`, { timeout: 10000 }, async t => {
+    const { path } = await fixture(t, 0.2);
+    const source = format === 'wav' ? path : resolve(`test/audio/tone.${format}`);
+    const p = await engine(t);
+    p.send(`B 1 0 ${Buffer.from(source).toString('hex')}`);
+    assert.equal(await p.next(), 'STARTED 1');
+    p.send('T 1 1');
+    const timing = (await p.next()).split(' ');
+    assert.deepEqual(timing.slice(0, 4), ['TIMING', '1', '1', '0']);
+    assert.ok(Number(timing[4]) > 0.1 && Number(timing[4]) < 0.5);
+    await delay(50);
+    p.send('T 1 2');
+    assert.equal((await p.next()).split(' ')[3], '0');
+    p.send('Q 1 0.05 3'); assert.equal(await p.next(), 'SEEKED 1 3');
+    p.send('T 1 4'); assert.ok(Math.abs(Number((await p.next()).split(' ')[3]) - 0.05) < 0.0001);
+    p.send('A 1 5 0'); assert.equal(await p.next(), 'PAUSED 1 5 0');
+    assert.equal(await p.next(), 'DONE 1 ended');
+    p.send('A 1 6 0'); // Completed handles never restart.
+  });
+}
+
+for (const command of ['A 1 0 1', 'A 1 1 2', 'A 1 1 1 extra', 'T 1 9007199254740992', 'T 1 1 extra']) {
+  test(`native: malformed pause/timing command fails closed (${command})`, { timeout: 5000 }, async t => {
+    const p = await engine(t);
+    p.send(command);
+    assert.equal((await p.closed)[0], 2);
+  });
+}

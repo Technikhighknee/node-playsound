@@ -6,7 +6,7 @@ import { Session } from './session.js';
 import type { Engine, EngineEvent, EngineFactory } from './session.js';
 
 export type PlaybackResult = 'ended' | 'stopped';
-export type PlaybackState = 'pending' | 'playing' | 'stopping' | 'ended' | 'stopped' | 'failed';
+export type PlaybackState = 'pending' | 'playing' | 'paused' | 'stopping' | 'ended' | 'stopped' | 'failed';
 export type AudioFile = string | URL;
 
 export interface PlayOptions {
@@ -17,8 +17,14 @@ export interface PlayOptions {
 }
 export interface SoundOptions { volume?: number }
 export interface PlayerOptions {
-  /** Maximum pending and active plays, from 1 to 256. Default: 64. */
+  /** Maximum pending, playing, and paused plays, from 1 to 256. Default: 64. */
   maxConcurrent?: number;
+}
+export interface PlaybackTiming {
+  /** Absolute seconds handed from the PCM stream to the mixer, not speaker time. */
+  readonly position: number;
+  /** Decoder-reported seconds, or null when unavailable. */
+  readonly duration: number | null;
 }
 export interface Playback extends AsyncDisposable {
   /** Rejects with AudioError on failure. Always observe this promise. */
@@ -30,6 +36,12 @@ export interface Playback extends AsyncDisposable {
   stop(): Promise<PlaybackResult>;
   /** Request an absolute position in seconds. Failures reject finished. */
   seek(seconds: number): void;
+  /** Idempotent request. State changes after acknowledgment; failures reject finished. */
+  pause(): void;
+  /** Resume without rewinding. Harmless unless pause was requested. */
+  resume(): void;
+  /** On-demand native snapshot after earlier controls; null if playback has settled. */
+  getTiming(): Promise<PlaybackTiming | null>;
 }
 export interface Sound {
   /** Each call creates an independent playback, including when calls overlap. */
@@ -67,11 +79,15 @@ class Handle implements Playback {
   #stop: () => void;
   #change: (volume: number) => void;
   #seek: (seconds: number) => void;
-  constructor(volume: number, stop: () => void, change: (volume: number) => void, seek: (seconds: number) => void) {
+  #pause: (paused: boolean) => void;
+  #timing: () => Promise<PlaybackTiming | null>;
+  constructor(volume: number, stop: () => void, change: (volume: number) => void, seek: (seconds: number) => void, pause: (paused: boolean) => void, timing: () => Promise<PlaybackTiming | null>) {
     this.#volume = volume;
     this.#stop = stop;
     this.#change = change;
     this.#seek = seek;
+    this.#pause = pause;
+    this.#timing = timing;
     this.finished = new Promise((resolve, reject) => { this.#resolve = resolve; this.#reject = reject; });
   }
   get state(): PlaybackState { return this.#state; }
@@ -83,13 +99,19 @@ class Handle implements Playback {
       throw new RangeError('Seek position must be a finite, nonnegative number of seconds.');
     this.#seek(seconds);
   }
+  pause(): void { this.#pause(true); }
+  resume(): void { this.#pause(false); }
+  getTiming(): Promise<PlaybackTiming | null> { return this.#timing(); }
+  paused(value: boolean): void { if (this.#state === 'playing' || this.#state === 'paused') this.#state = value ? 'paused' : 'playing'; }
   async [Symbol.asyncDispose](): Promise<void> { await this.stop(); }
-  starting(): void { if (this.#state === 'pending') this.#state = 'playing'; }
+  starting(paused: boolean): void { if (this.#state === 'pending') this.#state = paused ? 'paused' : 'playing'; }
   stopping(): void { this.#state = 'stopping'; }
   settle(result: PlaybackResult | AudioError): void {
     this.#stop = () => {};
     this.#change = () => {};
     this.#seek = () => {};
+    this.#pause = () => {};
+    this.#timing = () => Promise.resolve(null);
     if (result instanceof AudioError) { this.#state = 'failed'; this.#reject(result); }
     else { this.#state = result; this.#resolve(result); }
   }
@@ -101,7 +123,14 @@ interface Entry {
   handle: Handle;
   sent: boolean;
   seekTarget: number | undefined;
-  seeking: boolean;
+  seeking: number | undefined;
+  desiredPaused: boolean;
+  initialPaused: boolean;
+  token: number;
+  pauseRequest: { token: number; paused: boolean } | undefined;
+  pauseTimer: NodeJS.Timeout | undefined;
+  query: { promise: Promise<PlaybackTiming | null>; resolve: (value: PlaybackTiming | null) => void;
+    reject: (error: AudioError) => void; token: number | undefined; timer: NodeJS.Timeout } | undefined;
   timer: NodeJS.Timeout | undefined;
   removeAbort: (() => void) | undefined;
 }
@@ -153,8 +182,16 @@ export class Controller {
       if (this.#closed || !this.#entries.has(id) || handle.state === 'stopping') return;
       entry.seekTarget = seconds;
       this.#seek(entry);
-    });
-    const entry: Entry = { id, path, handle, sent: false, seekTarget: undefined, seeking: false, timer: undefined, removeAbort: undefined };
+    }, paused => {
+      if (this.#closed || !this.#entries.has(id) || handle.state === 'stopping') return;
+      entry.desiredPaused = paused;
+      this.#pause(entry);
+    }, () => this.#timing(entry));
+    const entry: Entry = {
+      id, path, handle, sent: false, seekTarget: undefined, seeking: undefined,
+      desiredPaused: false, initialPaused: false, token: 0, pauseRequest: undefined,
+      pauseTimer: undefined, query: undefined, timer: undefined, removeAbort: undefined,
+    };
     if (this.#closed) { handle.settle(new AudioError('PLAYER_CLOSED', 'This player is closed. Create a new Player to play audio.')); return handle; }
     if (signal?.aborted) { handle.settle('stopped'); return handle; }
     if (this.#entries.size >= this.#limit) {
@@ -188,7 +225,7 @@ export class Controller {
     }
     try {
       if (!this.#engine) {
-        const engine = this.#factory(event => this.#event(event), error => {
+        const engine = this.#factory(event => { if (this.#engine === engine) this.#event(event); }, error => {
           if (this.#engine !== engine) return;
           this.#engine = undefined;
           this.#retire(engine);
@@ -197,7 +234,8 @@ export class Controller {
         this.#engine = engine;
       }
       entry.sent = true;
-      this.#engine.play(entry.id, entry.path, entry.handle.volume);
+      entry.initialPaused = entry.desiredPaused;
+      this.#engine.play(entry.id, entry.path, entry.handle.volume, entry.initialPaused);
     } catch (cause) {
       this.#settle(entry, cause instanceof AudioError ? cause : new AudioError('ENGINE_ERROR', 'Could not initialize the audio engine.', { cause }));
     }
@@ -209,24 +247,91 @@ export class Controller {
     if (event.type === 'started') {
       if (entry.handle.state !== 'pending' && entry.handle.state !== 'stopping') return;
       if (entry.handle.state !== 'stopping') { clearTimeout(entry.timer); entry.timer = undefined; }
-      entry.handle.starting();
+      entry.handle.starting(entry.initialPaused);
+      this.#pause(entry);
       this.#seek(entry);
+      this.#query(entry);
     } else if (event.type === 'seeked') {
-      if (!entry.seeking || entry.handle.state !== 'playing') return;
+      if (entry.seeking !== event.token || !this.#active(entry)) return;
       clearTimeout(entry.timer);
       entry.timer = undefined;
-      entry.seeking = false;
+      entry.seeking = undefined;
       this.#seek(entry);
+      this.#query(entry);
+    } else if (event.type === 'paused') {
+      if (!this.#active(entry) || entry.pauseRequest?.token !== event.token) return;
+      if (entry.pauseRequest.paused !== event.paused) {
+        this.#engine?.fail(new AudioError('ENGINE_ERROR', 'The audio engine acknowledged an incorrect pause state.'));
+        return;
+      }
+      clearTimeout(entry.pauseTimer);
+      entry.pauseTimer = undefined;
+      entry.pauseRequest = undefined;
+      entry.handle.paused(event.paused);
+      this.#pause(entry);
+      this.#query(entry);
+    } else if (event.type === 'timing') {
+      if (!this.#active(entry) || entry.query?.token !== event.token) return;
+      clearTimeout(entry.query.timer);
+      const query = entry.query;
+      entry.query = undefined;
+      query.resolve(Object.freeze({ position: event.position, duration: event.duration }));
     } else this.#settle(entry, event.type === 'done' ? event.reason : event.error);
   }
 
   #seek(entry: Entry): void {
-    if (entry.handle.state !== 'playing' || entry.seeking || entry.seekTarget === undefined || this.#closed) return;
+    if (!this.#active(entry) || entry.seeking || entry.seekTarget === undefined) return;
     const seconds = entry.seekTarget;
     entry.seekTarget = undefined;
-    entry.seeking = true;
+    const token = this.#token(entry);
+    if (!token) return;
+    entry.seeking = token;
     entry.timer = setTimeout(() => this.#timeout(entry, 'Audio seeking did not complete within 10 seconds.'), 10_000);
-    this.#engine?.seek(entry.id, seconds);
+    this.#engine?.seek(entry.id, seconds, token);
+  }
+
+  #active(entry: Entry): boolean {
+    return !this.#closed && this.#entries.has(entry.id) && (entry.handle.state === 'playing' || entry.handle.state === 'paused');
+  }
+
+  #token(entry: Entry): number {
+    if (entry.token === Number.MAX_SAFE_INTEGER) {
+      this.#engine?.fail(new AudioError('ENGINE_ERROR', 'Playback command token limit reached.'));
+      return 0;
+    }
+    return ++entry.token;
+  }
+
+  #pause(entry: Entry): void {
+    if (!this.#active(entry) || entry.pauseRequest || (entry.handle.state === 'paused') === entry.desiredPaused) return;
+    const token = this.#token(entry);
+    if (!token) return;
+    entry.pauseRequest = { token, paused: entry.desiredPaused };
+    entry.pauseTimer = setTimeout(() => this.#timeout(entry, 'Audio pause/resume did not complete within 10 seconds.'), 10_000);
+    this.#engine?.pause(entry.id, token, entry.desiredPaused);
+  }
+
+  #timing(entry: Entry): Promise<PlaybackTiming | null> {
+    if (this.#closed || !this.#entries.has(entry.id) || entry.handle.state === 'stopping') return Promise.resolve(null);
+    if (!entry.query) {
+      let resolve!: (value: PlaybackTiming | null) => void;
+      let reject!: (error: AudioError) => void;
+      const promise = new Promise<PlaybackTiming | null>((yes, no) => { resolve = yes; reject = no; });
+      entry.query = { promise, resolve, reject, token: undefined,
+        timer: setTimeout(() => this.#timeout(entry, 'Audio timing query did not complete within 10 seconds.'), 10_000) };
+      this.#query(entry);
+      return promise;
+    }
+    return entry.query.promise;
+  }
+
+  #query(entry: Entry): void {
+    if (!this.#active(entry) || !entry.query || entry.query.token !== undefined || entry.seeking ||
+      entry.seekTarget !== undefined || entry.pauseRequest || (entry.handle.state === 'paused') !== entry.desiredPaused) return;
+    const token = this.#token(entry);
+    if (!token) return;
+    entry.query.token = token;
+    this.#engine?.timing(entry.id, token);
   }
 
   #timeout(entry: Entry, message: string): void {
@@ -240,6 +345,8 @@ export class Controller {
     if (!this.#entries.has(entry.id) || entry.handle.state === 'stopping') return;
     if (!entry.sent) { this.#settle(entry, 'stopped'); return; }
     entry.handle.stopping();
+    clearTimeout(entry.pauseTimer);
+    if (entry.query) clearTimeout(entry.query.timer);
     clearTimeout(entry.timer);
     entry.timer = setTimeout(() => this.#timeout(entry, 'The audio engine did not stop playback within 2 seconds.'), 2000);
     this.#engine?.stop(entry.id);
@@ -248,6 +355,13 @@ export class Controller {
   #settle(entry: Entry, result: PlaybackResult | AudioError): void {
     if (!this.#entries.delete(entry.id)) return;
     clearTimeout(entry.timer);
+    clearTimeout(entry.pauseTimer);
+    if (entry.query) {
+      clearTimeout(entry.query.timer);
+      if (result instanceof AudioError) entry.query.reject(result);
+      else entry.query.resolve(null);
+      entry.query = undefined;
+    }
     entry.removeAbort?.();
     entry.removeAbort = undefined;
     entry.handle.settle(result instanceof AudioError
@@ -281,6 +395,8 @@ export class Controller {
     });
     for (const entry of this.#entries.values()) {
       clearTimeout(entry.timer);
+      clearTimeout(entry.pauseTimer);
+      if (entry.query) clearTimeout(entry.query.timer);
       entry.removeAbort?.();
       entry.removeAbort = undefined;
       entry.handle.stopping();
