@@ -158,3 +158,35 @@ node examples/seeking.mjs ./track.flac 80
 For a source checkout, follow [development setup](development.md) first. To use
 an installed package, copy an example into your own ESM project; no compiler is
 needed on the consumer's machine.
+
+
+## Pause and inspect a playback
+
+Keep observing completion while awaiting a timing query: either can reject.
+Pausing retains resources, so this example always closes its owner.
+
+```ts
+import { Player } from 'node-playsound';
+
+const player = new Player();
+try {
+  const playback = player.play('./track.flac');
+  playback.pause(); // Synchronous request before dispatch: start paused.
+  const inspect = async () => {
+    playback.seek(80);
+    const timing = await playback.getTiming(); // Waits for the seek; stays paused.
+    if (timing) {
+      console.log(timing.position, timing.duration ?? 'unknown duration');
+      playback.resume();
+    }
+  };
+  await Promise.all([playback.finished, inspect()]);
+} finally {
+  await player.close();
+}
+```
+
+For a progress display, query serially at the display's required rate rather than
+starting overlapping intervals. The returned position reflects mixer consumption,
+not speaker time. Stop refreshing when a query returns null. `finished` remains
+the authority for completion and failure.

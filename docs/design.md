@@ -93,7 +93,7 @@ one latest pending target per voice. It dispatches after `STARTED`, bounds
 each operation to ten seconds, and ignores late acknowledgments during stop
 or close. The existing completion gate handles natural-end and failure races.
 
-Protocol 2 adds `Q id seconds` and `SEEKED id`. Older helpers fail the startup
+Protocol 3 uses `Q id seconds token` and `SEEKED id token`. Older helpers fail the startup
 handshake instead of silently ignoring a new command. The native main thread
 converts seconds using the decoded output sample rate, checks the cached length, and
 ends beyond-end requests before any unsafe floating-point-to-integer cast.
@@ -161,7 +161,7 @@ both promises. No timer runs simply to refresh position. Query and control deadl
 are ten seconds and cannot be postponed by repeated requests.
 
 Each voice has one in-flight pause transition, one latest requested pause state,
-one in-flight seek plus its latest target, and one shared timing request. Pause and
+one in-flight seek plus its latest target, and one shared timing request. Seek, pause, and
 timing acknowledgments carry monotonically increasing request tokens; stale tokens
 cannot clear a newer deadline. Stop discards every unwritten control/query for its
 voice; bytes already accepted by the pipe retain their order. A pending seek cannot
@@ -171,7 +171,8 @@ by engine identity. Protocol 3 rejects older executables at startup.
 
 Native pause closes a gate under the short PCM lock before stopping the miniaudio
 sound through its public API. The callback only tries that lock, never waits. Resume
-starts the sound before reopening the gate. This also fences a callback already
+uses public `ma_node_set_state` before reopening the gate; unlike
+`ma_sound_start`, this never rewinds a sound if EOF races the command. This also fences a callback already
 running when pause arrives. Seek never changes this gate or the sound's paused state.
 Workers may finish/refill the bounded 16,384-frame ring while paused, then do no
 more decoding until space is freed or a seek arrives. Paused voices still own their

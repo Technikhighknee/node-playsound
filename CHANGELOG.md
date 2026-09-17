@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add individual playback pause/resume and acknowledged `paused` state.
+- Add on-demand `getTiming()` snapshots with mixer-consumed position and nullable duration.
+- Preserve pause across seek and bound control/query traffic and deadlines.
+- Use protocol 3 with request tokens to reject stale seek/control acknowledgments.
+
 ## 0.1.2
 
 - Improve the package description and discovery keywords.
