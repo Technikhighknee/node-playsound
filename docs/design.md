@@ -175,7 +175,10 @@ uses public `ma_node_set_state` before reopening the gate; unlike
 `ma_sound_start`, this never rewinds a sound if EOF races the command. This also fences a callback already
 running when pause arrives. Seek never changes this gate or the sound's paused state.
 Workers may finish/refill the bounded 16,384-frame ring while paused, then do no
-more decoding until space is freed or a seek arrives. Paused voices still own their
+more decoding until space is freed or a seek arrives. This primes resume and seek
+without increasing memory or introducing another worker. Duration discovery stays
+in the existing initialization path and is cached, never rescanned by a query.
+Paused voices still own their
 decoder, buffer, native voice, device, and public concurrency slot. The limits remain
 256 native voices and 64 public plays by default. Stop/close detach the mixer before
 waiting for decoder ownership, exactly as for playing voices. Two stalled workers

@@ -2,6 +2,50 @@
 
 [Documentation](../README.md#documentation) · [API reference](api.md)
 
+## Pause and timing validation (2026-09-17)
+
+The unpublished pause/timing change is tracked in [PR #6](https://github.com/Technikhighknee/node-playsound/pull/6).
+Use its [checks](https://github.com/Technikhighknee/node-playsound/pull/6/checks)
+for the exact tested commit and downloadable artifacts. Protocol 3 requires all
+helpers to be rebuilt together; published 0.1.2 does not contain these features.
+
+Local Windows x64 / Node 24.14.0 validation includes strict typecheck, the full
+suite, documentation compilation/link checks, production-device checks, and an
+installed ESM/TypeScript consumer with scripts disabled and no runtime dependencies.
+The expanded suite has 104 tests; the offline pause renderer and paused-worker
+teardown also run in the Linux ASan/UBSan/leak-detection job. CI runs the suite on
+Windows, macOS, and Linux, x64 and ARM64, under Node 22 and 24, then verifies the
+complete six-engine archive and publication dry-run. Refer to the linked checks
+rather than treating the existence of a workflow as evidence of success.
+
+New coverage includes:
+
+- Pause before dispatch and after startup, repeated pause/resume, retained
+  concurrency capacity, and 256-voice batches including initially paused voices.
+- Exact offline mixer-consumed positions, pause stability, resume advancement,
+  forward/backward seeking while paused, and independent concurrent voices.
+- WAV/MP3/FLAC duration and natural completion, explicit unknown duration,
+  beyond-end seeking while paused, starvation, and frame-counter overflow.
+- Shared queries, startup/seek barriers, pause around in-flight seek, stale tokens,
+  retired engine callbacks, malformed responses, and fixed operation deadlines.
+- Stop/abort/close/failure while paused; real OS-pipe backpressure removes unwritten
+  seek/pause/timing commands without discarding peers' commands.
+- Decoder failure while paused, bounded refilling, and destruction waiting for
+  a blocked worker before releasing a paused stream's memory.
+
+The production Windows device backend passed WAV/MP3/FLAC paused startup,
+known duration, seek while paused, stable snapshots, resume, and completion.
+The longer WAV also verified pause after position had advanced. Physical-speaker
+accuracy is intentionally not claimed; no timing API can retract device buffers.
+Physical macOS/Linux listening remains unverified and is separate from CI's
+silent-backend and offline PCM evidence.
+
+Hostile review tightened EOF races (public node-state resume cannot rewind an
+ended sound), added seek acknowledgment tokens, fenced retired engine callbacks,
+and rejected frame-counter overflow. Queries neither read decoders nor allocate,
+block, or write IPC in the callback. Tests verify worker ownership and stale PCM
+separately from the timing snapshot. Vendored miniaudio remains unmodified.
+
 ## Published 0.1.0 compatibility finding
 
 On 2026-09-16, the npm Windows x64 helper crashed before `READY` on an AMD
