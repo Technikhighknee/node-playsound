@@ -36,7 +36,7 @@ for (const mode of ['seek', 'fail-seek', 'fail-read', 'unknown-length']) {
   });
 }
 
-for (const rate of [48000, 24000]) for (const mode of ['seek-refill', 'close-refill', 'stale-error']) {
+for (const rate of [48000, 24000]) for (const mode of ['seek-refill', 'close-refill', 'pause-close-refill', 'stale-error']) {
   test(`native: bounded streaming workers preserve PCM and lifetime (${mode}, ${rate} Hz)`, { timeout: 10000 }, async t => {
     const { path } = await fixture(t, 4);
     const data = wav(4);

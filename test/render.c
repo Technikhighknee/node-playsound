@@ -95,6 +95,7 @@ static int buffering(const char* hex, const char* mode)
     ma_uint64 count;
     if (stream_read(&source, actual, STREAM_CHUNK, &count) != MA_SUCCESS || count != STREAM_CHUNK) return 1;
     ma_event_wait(&entered); // The source decoder is now blocked outside its lock.
+    if (!strcmp(mode, "pause-close-refill")) stream_pause(&source, 1);
     // The other worker must keep its own decoder moving across buffer wraps.
     ma_uint64 total = 0;
     double start = ps_seconds();
@@ -109,7 +110,7 @@ static int buffering(const char* hex, const char* mode)
     }
     if (total != source.length || total <= STREAM_CAPACITY * 2) return 1;
     stream_uninit(&peer);
-    if (!strcmp(mode, "close-refill")) {
+    if (!strcmp(mode, "close-refill") || !strcmp(mode, "pause-close-refill")) {
         ps_thread closing;
         atomic_store(&closed, 0);
         if (!ps_thread_start(&closing, close_stream, &source)) return 1;
@@ -266,6 +267,11 @@ static int pause_timing(const char* hex)
     for (int i = 0; i < STREAM_CAPACITY / 480 + 2; i++) stream_read(&starved, pcm, 480, &count);
     before = cursor_of(&starved);
     if (stream_read(&starved, pcm, 480, &count) != MA_BUSY || count || cursor_of(&starved) != before) return 1;
+    /* A malformed huge frame domain must fail, never wrap position to zero. */
+    stream_step(&starved);
+    starved.cursor = UINT64_MAX;
+    if (stream_read(&starved, pcm, 480, &count) != MA_BUSY || count ||
+        atomic_load(&starved.error) != MA_OUT_OF_RANGE) return 1;
     stream_uninit(&starved);
     ma_engine_uninit(&engine);
     puts("PAUSE_TIMING_OK");
@@ -275,7 +281,7 @@ static int pause_timing(const char* hex)
 static int run(int argc, char** argv)
 {
     if (argc == 3 && !strcmp(argv[2], "pause-timing")) return pause_timing(argv[1]);
-    if (argc == 3 && (!strcmp(argv[2], "seek-refill") || !strcmp(argv[2], "close-refill") || !strcmp(argv[2], "stale-error")))
+    if (argc == 3 && (!strcmp(argv[2], "seek-refill") || !strcmp(argv[2], "close-refill") || !strcmp(argv[2], "pause-close-refill") || !strcmp(argv[2], "stale-error")))
         return buffering(argv[1], argv[2]);
     if (argc == 3) return seeking(argv[1], argv[2]);
     if (argc != 2) return 2;

@@ -45,6 +45,11 @@ static ma_result stream_read(ma_data_source* source, void* out, ma_uint64 reques
         return MA_BUSY; /* Main thread reports errors and destroys the voice. */
     }
     unsigned count = requested < s->count ? (unsigned)requested : s->count;
+    if (count > UINT64_MAX - s->cursor) {
+        atomic_store(&s->error, MA_OUT_OF_RANGE);
+        stream_unlock(s);
+        return MA_BUSY;
+    }
     unsigned first = count < STREAM_CAPACITY - s->read_pos ? count : STREAM_CAPACITY - s->read_pos;
     if (out != NULL) {
         memcpy(out, s->pcm + s->read_pos * 2, first * 2 * sizeof(float));

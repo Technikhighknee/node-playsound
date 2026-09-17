@@ -108,7 +108,7 @@ export class Session implements Engine {
     } else this.#send(`S${id}`, `S ${id}\n`);
   }
   volume(id: number, volume: number): void { this.#send(`V${id}`, `V ${id} ${volume}\n`); }
-  seek(id: number, seconds: number, token = 1): void { this.#send(`Q${id}`, `Q ${id} ${seconds} ${token}\n`); }
+  seek(id: number, seconds: number, token: number): void { this.#send(`Q${id}`, `Q ${id} ${seconds} ${token}\n`); }
 
   pause(id: number, token: number, paused: boolean): void { this.#send(`A${id}`, `A ${id} ${token} ${paused ? 1 : 0}\n`); }
   timing(id: number, token: number): void { this.#send(`T${id}`, `T ${id} ${token}\n`); }

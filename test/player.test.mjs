@@ -451,3 +451,34 @@ test('stale seek tokens cannot acknowledge a newer seek or release its timing ba
   engine.event({ type: 'timing', id: 1, token: 3, position: 2, duration: 3 });
   assert.equal((await query).position, 2);
 });
+
+test('an incorrect pause acknowledgment fails the engine instead of inventing state', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t);
+  const p = player.play(path);
+  const engine = await started(1); engine.event({ type: 'started', id: 1 });
+  const failure = assert.rejects(p.finished, { code: 'ENGINE_ERROR' });
+  p.pause(); const timing = assert.rejects(p.getTiming(), { code: 'ENGINE_ERROR' });
+  engine.event({ type: 'paused', id: 1, token: 1, paused: false });
+  await Promise.all([failure, timing]);
+});
+
+test('retired engine callbacks cannot affect a restarted engine or its timing query', async t => {
+  const { path } = await fixture(t);
+  const { player, engines, started } = setup(t);
+  const a = player.play(path); a.pause();
+  const old = await started(1);
+  const failed = assert.rejects(a.finished, { code: 'ENGINE_ERROR' });
+  old.fail(new AudioError('ENGINE_ERROR', 'crashed')); await failed;
+  const b = player.play(path); b.pause();
+  await until(() => engines.length === 2);
+  const query = b.getTiming();
+  old.event({ type: 'done', id: 2, reason: 'ended' });
+  old.event({ type: 'started', id: 2 });
+  assert.equal(b.state, 'pending');
+  engines[1].event({ type: 'started', id: 2 });
+  old.event({ type: 'timing', id: 2, token: 1, position: 999, duration: null });
+  engines[1].event({ type: 'timing', id: 2, token: 1, position: 0, duration: 1 });
+  assert.equal((await query).position, 0);
+  assert.equal(b.state, 'paused');
+});

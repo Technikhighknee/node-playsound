@@ -28,7 +28,7 @@ test('native illegal-instruction crashes explain CPU compatibility', () => {
 
 test('transport accepts split and batched protocol messages', { timeout: 5000 }, async t => {
   const { engine, events } = session(t, 'normal');
-  engine.play(1, 'a\n" & éŸ³.wav', 0.5);
+  engine.play(1, 'a\n" & Ã©Å¸Â³.wav', 0.5);
   while (events.length < 2) await turn();
   assert.deepEqual(events, [{ type: 'started', id: 1 }, { type: 'done', id: 1, reason: 'ended' }]);
   const closing = engine.close();
@@ -86,11 +86,11 @@ test('stop removes an unwritten seek after play was written under real pipe back
   // The child has paused reads until we create the gate. Fill the OS pipe
   // too: a single large write can complete synchronously on Linux.
   for (let id = 2; id <= 33; id++) engine.play(id, 'x'.repeat(65536), 1);
-  engine.seek(1, 80);
+  engine.seek(1, 80, 1);
   engine.pause(1, 2, true);
   engine.timing(1, 3);
   engine.volume(1, 0.5);
-  engine.seek(2, 10);
+  engine.seek(2, 10, 1);
   engine.stop(1);
   await writeFile(gate, 'resume');
   while (!events.some(e => e.type === 'done' && e.id === 1)) await turn();
