@@ -275,7 +275,8 @@ for (const format of ['wav', 'mp3', 'flac']) {
   });
 }
 
-for (const command of ['A 1 0 1', 'A 1 1 2', 'A 1 1 1 extra', 'T 1 9007199254740992', 'T 1 1 extra']) {
+for (const command of ['A 1 0 1', 'A 1 1 2', 'A 1 1 1 extra', 'T 1 9007199254740992', 'T 1 1 extra', 'A 1 1 4294967297', 'A 1 1 -4294967295',
+  'T 1 18446744073709551617', 'A 4294967297 1 1', 'Q 1 0 18446744073709551617']) {
   test(`native: malformed pause/timing command fails closed (${command})`, { timeout: 5000 }, async t => {
     const p = await engine(t);
     p.send(command);

@@ -121,10 +121,17 @@ static int command(ma_engine* engine, char* line)
 #endif
     char op, extra;
     unsigned id;
+    char id_text[11];
+    int id_end = 0;
     float volume;
     int offset = 0;
     if (!strcmp(line, "QUIT\n")) return 0;
-    if (sscanf(line, "%c %u", &op, &id) != 2 || !id) return -1;
+    /* Bounded decimal fields avoid scanf integer-overflow behavior. */
+    if (sscanf(line, "%c %10[0-9]%n", &op, id_text, &id_end) != 2 ||
+        (line[id_end] != ' ' && line[id_end] != '\n' && line[id_end] != '\r')) return -1;
+    uint64_t parsed_id = strtoull(id_text, NULL, 10);
+    if (!parsed_id || parsed_id > UINT32_MAX) return -1;
+    id = (unsigned)parsed_id;
     voice* v = NULL;
     for (int i = 0; i < MAX_VOICES; ++i) if (voices[i].id == id) v = &voices[i];
     if (op == 'P' || op == 'B') {
@@ -160,11 +167,12 @@ static int command(ma_engine* engine, char* line)
         printf("STARTED %u\n", id);
     } else if (op == 'Q') {
         double seconds;
-        uint64_t token;
+        char token_text[17];
         ma_uint32 rate;
         ma_uint64 length;
-        if (sscanf(line, "Q %u %lf %" SCNu64 " %c", &id, &seconds, &token, &extra) != 3 || !isfinite(seconds) || seconds < 0 ||
-            !token || token > 9007199254740991ULL) return -1;
+        if (sscanf(line, "Q %u %lf %16[0-9] %c", &id, &seconds, token_text, &extra) != 3 || !isfinite(seconds) || seconds < 0) return -1;
+        uint64_t token = strtoull(token_text, NULL, 10);
+        if (!token || token > 9007199254740991ULL) return -1;
         if (!v) return 1; /* Natural completion may have won the command race. */
         if (v->seeking) return -1; /* Controller permits one in-flight seek. */
         ma_result result = ma_sound_get_data_format(&v->sound, NULL, NULL, &rate, NULL, 0);
@@ -185,12 +193,13 @@ static int command(ma_engine* engine, char* line)
             printf("ERROR %u DECODE %d\n", id, result);
         } else v->seeking = token;
     } else if (op == 'A' || op == 'T') {
-        uint64_t token;
-        int paused = 0;
+        char token_text[17], pause_flag = '0';
         if (op == 'A') {
-            if (sscanf(line, "A %u %" SCNu64 " %d %c", &id, &token, &paused, &extra) != 3 ||
-                (paused != 0 && paused != 1)) return -1;
-        } else if (sscanf(line, "T %u %" SCNu64 " %c", &id, &token, &extra) != 2) return -1;
+            if (sscanf(line, "A %u %16[0-9] %c %c", &id, token_text, &pause_flag, &extra) != 3 ||
+                (pause_flag != '0' && pause_flag != '1')) return -1;
+        } else if (sscanf(line, "T %u %16[0-9] %c", &id, token_text, &extra) != 2) return -1;
+        int paused = pause_flag == '1';
+        uint64_t token = strtoull(token_text, NULL, 10);
         if (!token || token > 9007199254740991ULL) return -1;
         if (!v) return 1;
         /* EOF already observed by the mixer wins; resume must not rewind it. */

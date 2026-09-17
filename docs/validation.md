@@ -12,7 +12,7 @@ helpers to be rebuilt together; published 0.1.2 does not contain these features.
 Local Windows x64 / Node 24.14.0 validation includes strict typecheck, the full
 suite, documentation compilation/link checks, production-device checks, and an
 installed ESM/TypeScript consumer with scripts disabled and no runtime dependencies.
-The expanded suite has 104 tests; the offline pause renderer and paused-worker
+The expanded suite has 109 tests; the offline pause renderer and paused-worker
 teardown also run in the Linux ASan/UBSan/leak-detection job. CI runs the suite on
 Windows, macOS, and Linux, x64 and ARM64, under Node 22 and 24, then verifies the
 complete six-engine archive and publication dry-run. Refer to the linked checks
@@ -42,7 +42,7 @@ silent-backend and offline PCM evidence.
 
 Hostile review tightened EOF races (public node-state resume cannot rewind an
 ended sound), added seek acknowledgment tokens, fenced retired engine callbacks,
-and rejected frame-counter overflow. Queries neither read decoders nor allocate,
+and rejected frame-counter and protocol-number overflow. Queries neither read decoders nor allocate,
 block, or write IPC in the callback. Tests verify worker ownership and stale PCM
 separately from the timing snapshot. Vendored miniaudio remains unmodified.
 
