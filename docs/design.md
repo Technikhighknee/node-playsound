@@ -80,7 +80,7 @@ speaker. Volume is linear gain; mixing multiple full-volume files can clip.
 Use lower gains when layering loud recordings. Device changes may fail active
 plays rather than transparently migrating them.
 
-There is no pause, network streaming, device selector, effects graph,
+There is no network streaming, device selector, effects graph,
 global volume, or scheduling API. Additions should justify their lifecycle
 and portability costs. Codec support is explicit rather than delegated to
 whatever software happens to be installed.
@@ -132,9 +132,57 @@ ten seconds terminates the isolated helper with `TIMEOUT`; Node's existing
 seek and two-second stop/close deadlines also bound stuck work. Safe in-process
 cancellation of arbitrary decoder I/O is not assumed.
 
-Position and duration are not exposed: buffered playback and device latency
-make a synchronous cursor easy to misinterpret, and duration can be unknown.
-The public feature remains a single `seek(seconds): void` method.
+## Pause and timing contract
+
+`pause()` and `resume()` are idempotent commands like `seek()`: they return
+nothing; operational errors reject `finished`. State reflects native acknowledgment,
+not optimistic local intent. A pause before dispatch is included in the initial
+play command, so the voice never starts consuming PCM. A pause after dispatch
+can only affect audio not already consumed. Settled/stopping handles ignore controls.
+
+`getTiming(): Promise<PlaybackTiming | null>` samples the native stream on demand.
+The immutable result contains `position` in seconds and `duration: number | null`.
+Position is the absolute output-frame cursor handed from our PCM ring to the mixer,
+including a successful seek offset. It is not decoder read-ahead, wall-clock time,
+or a physical speaker timestamp. Device and mixer buffering can remain audible
+after pause. There is no extrapolation: starvation and pause do not advance the
+cursor; seek creates an explicit discontinuity. Seconds retain frame-derived
+precision, but delivery is asynchronous and block-granular, not sample scheduling.
+Duration uses the decoder's output-frame length when available, otherwise null;
+unknown length is never replaced by zero or a guessed duration.
+
+Queries before startup wait for it. A query waits for outstanding seeks and pause
+state changes before sampling. Overlapping queries share one promise and one
+snapshot; commands issued after a query has entered the pipe may happen after its
+snapshot. Queries resolve null if stop, close, or natural completion wins; a failure
+rejects pending queries as well as finished. After settlement a new query returns
+null, avoiding an invented final position after a killed engine. Callers must observe
+both promises. No timer runs simply to refresh position. Query and control deadlines
+are ten seconds and cannot be postponed by repeated requests.
+
+Each voice has one in-flight pause transition, one latest requested pause state,
+one in-flight seek plus its latest target, and one shared timing request. Pause and
+timing acknowledgments carry monotonically increasing request tokens; stale tokens
+cannot clear a newer deadline. Stop discards every unwritten control/query for its
+voice; bytes already accepted by the pipe retain their order. A pending seek cannot
+be cancelled by pause/resume: its decoder result remains authoritative. Completion
+or decoder failure can win over a pending command. Stale engine callbacks are fenced
+by engine identity. Protocol 3 rejects older executables at startup.
+
+Native pause closes a gate under the short PCM lock before stopping the miniaudio
+sound through its public API. The callback only tries that lock, never waits. Resume
+starts the sound before reopening the gate. This also fences a callback already
+running when pause arrives. Seek never changes this gate or the sound's paused state.
+Workers may finish/refill the bounded 16,384-frame ring while paused, then do no
+more decoding until space is freed or a seek arrives. Paused voices still own their
+decoder, buffer, native voice, device, and public concurrency slot. The limits remain
+256 native voices and 64 public plays by default. Stop/close detach the mixer before
+waiting for decoder ownership, exactly as for playing voices. Two stalled workers
+can still starve peers and trigger the existing isolation timeout.
+
+A synchronous position getter would conceal IPC staleness or require permanent
+polling. An event stream would create traffic even without readers. A single explicit
+snapshot keeps these costs bounded and lets applications choose their UI update rate.
 
 ## Evidence
 
