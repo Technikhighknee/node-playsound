@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Add individual playback pause/resume and acknowledged `paused` state.
 - Add on-demand `getTiming()` snapshots with mixer-consumed position and nullable duration.

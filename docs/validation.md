@@ -4,7 +4,7 @@
 
 ## Pause and timing validation (2026-09-17)
 
-The unpublished pause/timing change is tracked in [PR #6](https://github.com/Technikhighknee/node-playsound/pull/6).
+The 0.2.0 pause/timing change is tracked in [PR #6](https://github.com/Technikhighknee/node-playsound/pull/6).
 Use its [checks](https://github.com/Technikhighknee/node-playsound/pull/6/checks)
 for the exact tested commit and downloadable artifacts. Protocol 3 requires all
 helpers to be rebuilt together; published 0.1.2 does not contain these features.
