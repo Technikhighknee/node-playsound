@@ -45,6 +45,14 @@ one run of a file; seeking and volume affect only that run. Seeking is
 asynchronous, and seeking at or past the known duration ends playback.
 [See the complete seeking contract.](docs/api.md#seeking)
 
+Pause an individual playback with `playback.pause()` and continue with
+`playback.resume()`. Seeking while paused keeps it paused. To inspect progress,
+`await playback.getTiming()` returns `{ position, duration }` in seconds, or
+`null` if playback has settled. Duration can also be `null` when unknown.
+Position means PCM consumed by the mixer, **not what is currently audible**.
+[Pause and timing contracts](docs/api.md#pause-and-resume) explain acknowledgment,
+query failures, and resource ownership.
+
 ## Play a sound more than once
 
 ```ts
@@ -102,7 +110,7 @@ per player; reaching it fails the new play rather than queuing it.
 
 Volume is linear gain from `0` to `1`; overlapping loud recordings can clip.
 Completion means the engine consumed the audio, so a little audio may remain
-in device buffers. Pause, position/duration reporting, gapless transitions,
+in device buffers. Gapless transitions,
 and sample-accurate scheduling are not provided.
 
 ## Documentation

@@ -19,7 +19,7 @@ typedef struct {
     atomic_int error;
     atomic_int seeking;
     unsigned read_pos, count;
-    int eof, seek_pending;
+    int eof, seek_pending, paused;
     ma_uint64 target, generation, cursor;
     /* Pool mutex protects membership, busy, and busy_since. */
     int busy;
@@ -40,11 +40,16 @@ static ma_result stream_read(ma_data_source* source, void* out, ma_uint64 reques
     ps_stream* s = (ps_stream*)source;
     *read = 0;
     if (atomic_flag_test_and_set_explicit(&s->lock, memory_order_acquire)) return MA_BUSY;
-    if (atomic_load(&s->seeking) || atomic_load(&s->error) != MA_SUCCESS) {
+    if (s->paused || atomic_load(&s->seeking) || atomic_load(&s->error) != MA_SUCCESS) {
         stream_unlock(s);
         return MA_BUSY; /* Main thread reports errors and destroys the voice. */
     }
     unsigned count = requested < s->count ? (unsigned)requested : s->count;
+    if (count > UINT64_MAX - s->cursor) {
+        atomic_store(&s->error, MA_OUT_OF_RANGE);
+        stream_unlock(s);
+        return MA_BUSY;
+    }
     unsigned first = count < STREAM_CAPACITY - s->read_pos ? count : STREAM_CAPACITY - s->read_pos;
     if (out != NULL) {
         memcpy(out, s->pcm + s->read_pos * 2, first * 2 * sizeof(float));
@@ -57,6 +62,14 @@ static ma_result stream_read(ma_data_source* source, void* out, ma_uint64 reques
     ma_result result = count ? MA_SUCCESS : s->eof ? MA_AT_END : MA_BUSY;
     stream_unlock(s);
     return result;
+}
+
+/* Main-thread gate synchronizes with any in-progress PCM copy. */
+static void stream_pause(ps_stream* s, int paused)
+{
+    stream_lock(s);
+    s->paused = paused;
+    stream_unlock(s);
 }
 
 static ma_result stream_format(ma_data_source* source, ma_format* format, ma_uint32* channels,

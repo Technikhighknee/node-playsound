@@ -120,3 +120,23 @@ and a minimal script. State whether it reproduces with a known-good WAV and
 whether it happens during startup, normal playback, seeking, or shutdown.
 Include a small audio fixture only if you can share it publicly. CI and hardware
 coverage are recorded in [validation](validation.md).
+
+
+## Paused playback or unexpected timestamps
+
+A paused playback retains its concurrency slot and native resources. Use `stop()`
+or `Player.close()` when done; pausing is not cleanup. Brief audio already queued
+in the mixer/device can remain audible after pause. `state` acknowledges native
+control, not the instant a speaker becomes silent.
+
+`getTiming()` reports the stream's mixer-consumed position, so it can lead audible
+output, advance in blocks, and stay still during starvation. Do not extrapolate it
+as an exact audio clock. A null snapshot means playback stopped/finished before
+it could be sampled; a null duration means the decoder provided no usable length.
+Observe query rejections and `finished`. Seeking still requires a known length.
+
+If a UI stops updating while waiting for a query, check for a pending seek or
+engine failure. There is no automatic polling. Queries and pause/resume requests
+have bounded ten-second deadlines; stop and close retain their shorter cleanup
+bounds. An old helper executable fails the protocol handshake: reinstall or rebuild
+all native artifacts from the current source instead of mixing package versions.

@@ -65,7 +65,9 @@ test('unresponsive startup is bounded', { timeout: 5000 }, async t => {
 
 test('stop cancels buffered playback without waiting for engine readiness', { timeout: 5000 }, async t => {
   const { engine, events } = session(t, 'hang');
-  engine.play(1, 'unused', 1);
+  engine.play(1, 'unused', 1, true);
+  engine.pause(1, 1, false);
+  engine.timing(1, 2);
   engine.volume(1, 0.2);
   engine.stop(1);
   assert.deepEqual(events, [{ type: 'done', id: 1, reason: 'stopped' }]);
@@ -86,13 +88,15 @@ test('stop removes an unwritten seek after play was written under real pipe back
   // The child has paused reads until we create the gate. Fill the OS pipe
   // too: a single large write can complete synchronously on Linux.
   for (let id = 2; id <= 33; id++) engine.play(id, 'x'.repeat(65536), 1);
-  engine.seek(1, 80);
+  engine.seek(1, 80, 1);
+  engine.pause(1, 2, true);
+  engine.timing(1, 3);
   engine.volume(1, 0.5);
-  engine.seek(2, 10);
+  engine.seek(2, 10, 1);
   engine.stop(1);
   await writeFile(gate, 'resume');
   while (!events.some(e => e.type === 'done' && e.id === 1)) await turn();
-  assert.ok(!events.some(e => e.type === 'seeked' && e.id === 1), 'stopped voice must not execute its queued seek');
+  assert.ok(!events.some(e => ['seeked', 'paused', 'timing'].includes(e.type) && e.id === 1), 'stopped voice must not execute its queued seek');
   assert.ok(events.some(e => e.type === 'seeked' && e.id === 2), 'peer seek must survive');
   engine.stop(2);
   while (!events.some(e => e.type === 'done' && e.id === 2)) await turn();
@@ -136,4 +140,44 @@ test('seeking through actual pipes preserves peers, cancellation, and completion
   d.seek(1);
   await player.close();
   assert.equal(await d.finished, 'stopped');
+});
+
+for (const response of ['PAUSED 1 1 2', 'PAUSED 1 1 1 extra', 'PAUSED 1 0 1', 'TIMING 1 1 -1 2',
+  'TIMING 1 1 NaN -', 'TIMING 1 1 1 Infinity', 'TIMING 1 1 1e309 2', 'TIMING 1 9007199254740992 0 1',
+  'TIMING 1 1 0', 'TIMING 4294967296 1 0 1', 'SEEKED 1', 'SEEKED 1 0']) {
+  test(`transport rejects malformed timing/control response: ${response}`, { timeout: 5000 }, async t => {
+    const { engine, failed } = session(t, `response:${response}`);
+    engine.play(1, 'unused', 1);
+    assert.equal((await failed).code, 'ENGINE_ERROR');
+  });
+}
+
+test('pause, seek, timing and peer playback integrate through native pipes', { timeout: 10000 }, async t => {
+  const { path } = await fixture(t, 3);
+  const player = new Controller({}, (event, failed) => new Session(event, failed,
+    [resolve(`.tmp/playsound-test${process.platform === 'win32' ? '.exe' : ''}`), '--null', '--parent', String(process.pid)]));
+  t.after(() => player.close());
+  const a = player.play(path); a.pause();
+  const b = player.play(path);
+  assert.deepEqual(await a.getTiming(), { position: 0, duration: 3 });
+  assert.equal(a.state, 'paused');
+  a.seek(1.25);
+  assert.deepEqual(await a.getTiming(), { position: 1.25, duration: 3 });
+  assert.equal(a.state, 'paused');
+  const before = await b.getTiming();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal((await a.getTiming()).position, 1.25);
+  assert.ok((await b.getTiming()).position > before.position);
+  a.resume();
+  await a.getTiming();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.ok((await a.getTiming()).position > 1.25);
+  a.pause(); a.seek(0.25);
+  assert.equal((await a.getTiming()).position, 0.25);
+  a.volume = 0.2;
+  assert.equal(await a.stop(), 'stopped');
+  assert.equal(await a.getTiming(), null);
+  b.pause(); await b.getTiming();
+  await player.close();
+  assert.equal(await b.finished, 'stopped');
 });

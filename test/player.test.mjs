@@ -17,11 +17,13 @@ function setup(t, options) {
   const engines = [];
   const player = new Controller(options, (event, failed) => {
     const engine = {
-      calls: [], closed: 0, event,
+      calls: [], closed: 0, tokens: new Map(), event(value) { event(value.type === 'seeked' && value.token === undefined ? { ...value, token: this.tokens.get(value.id) } : value); },
       play(...args) { this.calls.push(['play', ...args]); },
       stop(id) { this.calls.push(['stop', id]); },
       volume(...args) { this.calls.push(['volume', ...args]); },
-      seek(...args) { this.calls.push(['seek', ...args]); },
+      pause(...args) { this.calls.push(['pause', ...args]); },
+      timing(...args) { this.calls.push(['timing', ...args]); },
+      seek(id, seconds, token) { this.tokens.set(id, token); this.calls.push(['seek', id, seconds]); },
       close() { this.closed++; return Promise.resolve(); },
       fail(error) { failed(error); },
     };
@@ -312,4 +314,171 @@ test('a stuck stop fails all affected plays with a bounded timeout', async t => 
   t.mock.timers.tick(2000);
   await checked;
   assert.equal(p.state, 'failed');
+});
+
+test('pause before dispatch starts paused; repeated commands and timing queries stay bounded', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t, { maxConcurrent: 1 });
+  const p = player.play(path);
+  p.pause(); p.pause();
+  const timing = p.getTiming();
+  for (let i = 0; i < 10000; i++) assert.equal(p.getTiming(), timing);
+  const engine = await started(1);
+  assert.equal(engine.calls[0][4], true);
+  engine.event({ type: 'started', id: 1 });
+  assert.equal(p.state, 'paused');
+  assert.deepEqual(engine.calls.at(-1), ['timing', 1, 1]);
+  engine.event({ type: 'timing', id: 1, token: 1, position: 0, duration: null });
+  assert.deepEqual(await timing, { position: 0, duration: null });
+  assert.ok(Object.isFrozen(await timing));
+  await assert.rejects(player.play(path).finished, { code: 'PLAYBACK_LIMIT' });
+  p.resume(); p.resume();
+  assert.deepEqual(engine.calls.at(-1), ['pause', 1, 2, false]);
+  assert.equal(p.state, 'paused');
+  engine.event({ type: 'paused', id: 1, token: 2, paused: false });
+  assert.equal(p.state, 'playing');
+  await player.close();
+  assert.equal(await timing, await timing);
+  assert.equal(await p.getTiming(), null);
+  p.pause(); p.resume();
+});
+
+test('pause after dispatch and controls during seek preserve acknowledgment and query ordering', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t);
+  const p = player.play(path);
+  const engine = await started(1);
+  p.pause();
+  assert.equal(engine.calls.length, 1);
+  engine.event({ type: 'started', id: 1 });
+  assert.deepEqual(engine.calls.at(-1), ['pause', 1, 1, true]);
+  p.seek(1);
+  const timing = p.getTiming();
+  p.resume(); p.pause(); p.resume();
+  engine.event({ type: 'paused', id: 1, token: 1, paused: true });
+  assert.deepEqual(engine.calls.at(-1), ['pause', 1, 3, false]);
+  engine.event({ type: 'paused', id: 1, token: 1, paused: true }); // Stale.
+  engine.event({ type: 'paused', id: 1, token: 3, paused: false });
+  assert.equal(engine.calls.filter(c => c[0] === 'timing').length, 0);
+  engine.event({ type: 'seeked', id: 1 });
+  assert.deepEqual(engine.calls.at(-1), ['timing', 1, 4]);
+  engine.event({ type: 'timing', id: 1, token: 2, position: 99, duration: 100 });
+  engine.event({ type: 'timing', id: 1, token: 4, position: 1, duration: 3 });
+  assert.deepEqual(await timing, { position: 1, duration: 3 });
+  p.pause();
+  engine.event({ type: 'paused', id: 1, token: 5, paused: true });
+  p.seek(0.5);
+  const next = p.getTiming();
+  engine.event({ type: 'seeked', id: 1 });
+  assert.equal(p.state, 'paused');
+  engine.event({ type: 'timing', id: 1, token: 7, position: 0.5, duration: 3 });
+  assert.equal((await next).position, 0.5);
+});
+
+for (const mode of ['stop', 'abort', 'close', 'ended', 'decode', 'engine']) {
+  test(`paused lifecycle settles outstanding timing during ${mode}`, async t => {
+    const { path } = await fixture(t);
+    const { player, started } = setup(t);
+    const signal = new AbortController();
+    const p = player.play(path, { signal: signal.signal }); p.pause();
+    const engine = await started(1); engine.event({ type: 'started', id: 1 });
+    const timing = p.getTiming();
+    if (mode === 'decode' || mode === 'engine') {
+      const error = new AudioError(mode === 'decode' ? 'DECODE_ERROR' : 'ENGINE_ERROR', 'fault');
+      const checks = [assert.rejects(p.finished, { code: error.code }), assert.rejects(timing, { code: error.code })];
+      if (mode === 'decode') engine.event({ type: 'error', id: 1, error }); else engine.fail(error);
+      await Promise.all(checks);
+    } else {
+      if (mode === 'close') await player.close();
+      else {
+        if (mode === 'stop') p.stop();
+        if (mode === 'abort') signal.abort();
+        engine.event({ type: 'done', id: 1, reason: mode === 'ended' ? 'ended' : 'stopped' });
+      }
+      assert.equal(await timing, null);
+      await p.finished;
+    }
+    engine.event({ type: 'paused', id: 1, token: 1, paused: false });
+    engine.event({ type: 'timing', id: 1, token: 1, position: 88, duration: 99 });
+    assert.equal(await p.getTiming(), null);
+  });
+}
+
+for (const mode of ['pause', 'timing']) {
+  test(`${mode} deadline is bounded despite repeated calls and stale responses`, async t => {
+    const { path } = await fixture(t);
+    const { player, started } = setup(t);
+    const p = player.play(path);
+    const engine = await started(1); engine.event({ type: 'started', id: 1 });
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const failure = assert.rejects(p.finished, { code: 'TIMEOUT' });
+    let query;
+    if (mode === 'pause') p.pause(); else query = assert.rejects(p.getTiming(), { code: 'TIMEOUT' });
+    t.mock.timers.tick(9999);
+    if (mode === 'pause') { p.pause(); engine.event({ type: 'paused', id: 1, token: 999, paused: true }); }
+    else p.getTiming();
+    t.mock.timers.tick(1);
+    await failure; if (query) await query;
+  });
+}
+
+test('stale pause and timing acknowledgments cannot clear a stop deadline', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t);
+  const p = player.play(path);
+  const engine = await started(1); engine.event({ type: 'started', id: 1 });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const failure = assert.rejects(p.finished, { code: 'TIMEOUT' });
+  const timing = assert.rejects(p.getTiming(), { code: 'TIMEOUT' });
+  p.pause(); p.stop();
+  engine.event({ type: 'timing', id: 1, token: 1, position: 1, duration: 2 });
+  engine.event({ type: 'paused', id: 1, token: 2, paused: true });
+  t.mock.timers.tick(2000);
+  await Promise.all([failure, timing]);
+});
+
+test('stale seek tokens cannot acknowledge a newer seek or release its timing barrier', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t);
+  const p = player.play(path);
+  const engine = await started(1); engine.event({ type: 'started', id: 1 });
+  p.seek(1); p.seek(2);
+  engine.event({ type: 'seeked', id: 1, token: 1 });
+  const query = p.getTiming();
+  engine.event({ type: 'seeked', id: 1, token: 1 });
+  assert.equal(engine.calls.filter(c => c[0] === 'timing').length, 0);
+  engine.event({ type: 'seeked', id: 1, token: 2 });
+  engine.event({ type: 'timing', id: 1, token: 3, position: 2, duration: 3 });
+  assert.equal((await query).position, 2);
+});
+
+test('an incorrect pause acknowledgment fails the engine instead of inventing state', async t => {
+  const { path } = await fixture(t);
+  const { player, started } = setup(t);
+  const p = player.play(path);
+  const engine = await started(1); engine.event({ type: 'started', id: 1 });
+  const failure = assert.rejects(p.finished, { code: 'ENGINE_ERROR' });
+  p.pause(); const timing = assert.rejects(p.getTiming(), { code: 'ENGINE_ERROR' });
+  engine.event({ type: 'paused', id: 1, token: 1, paused: false });
+  await Promise.all([failure, timing]);
+});
+
+test('retired engine callbacks cannot affect a restarted engine or its timing query', async t => {
+  const { path } = await fixture(t);
+  const { player, engines, started } = setup(t);
+  const a = player.play(path); a.pause();
+  const old = await started(1);
+  const failed = assert.rejects(a.finished, { code: 'ENGINE_ERROR' });
+  old.fail(new AudioError('ENGINE_ERROR', 'crashed')); await failed;
+  const b = player.play(path); b.pause();
+  await until(() => engines.length === 2);
+  const query = b.getTiming();
+  old.event({ type: 'done', id: 2, reason: 'ended' });
+  old.event({ type: 'started', id: 2 });
+  assert.equal(b.state, 'pending');
+  engines[1].event({ type: 'started', id: 2 });
+  old.event({ type: 'timing', id: 2, token: 1, position: 999, duration: null });
+  engines[1].event({ type: 'timing', id: 2, token: 1, position: 0, duration: 1 });
+  assert.equal((await query).position, 0);
+  assert.equal(b.state, 'paused');
 });

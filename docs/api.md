@@ -33,7 +33,7 @@ See [path examples](recipes.md#resolve-files-reliably).
 | --- | --- | --- | --- |
 | `volume` | `play`, `sound` | `1` | Finite linear gain between 0 and 1 |
 | `signal` | `play` | none | AbortSignal; abortion stops this play |
-| `maxConcurrent` | `Player` | `64` | Integer 1–256; includes pending playback |
+| `maxConcurrent` | `Player` | `64` | Integer 1–256; includes pending and paused playback |
 
 `sound(file, options).play(options)` takes the same playback options as
 `play`. Per-play volume overrides the captured default. A sound is immutable
@@ -63,10 +63,12 @@ each playback's `finished` promise for errors.
 | Member | Contract |
 | --- | --- |
 | `finished` | `Promise<'ended' \| 'stopped'>`; rejects with `AudioError` on failure |
-| `state` | Read-only: `pending`, `playing`, `stopping`, `ended`, `stopped`, or `failed` |
+| `state` | Read-only: `pending`, `playing`, `paused`, `stopping`, `ended`, `stopped`, or `failed` |
 | `volume` | Read/write gain; applies to this play only |
 | `stop()` | Idempotent; returns the same promise as `finished` |
 | `seek(seconds)` | Requests an absolute position; returns `void`; failures reject `finished` |
+| `pause()` / `resume()` | Idempotent requests; return `void`; failures reject `finished` |
+| `getTiming()` | `Promise<PlaybackTiming \| null>`; an on-demand native snapshot, or null after settlement |
 | `[Symbol.asyncDispose]()` | Stops and awaits completion |
 
 `pending` includes file validation and engine startup. `playing` means the
@@ -95,7 +97,8 @@ playback.seek(80); // Absolute seconds from the beginning; fractions are allowed
 await playback.finished;
 ```
 
-Seeking changes only this playhead, preserving volume and cancellation. It
+Seeking changes only this playhead, preserving volume, cancellation, and pause state.
+Seeking while paused does not resume playback. It
 does not create a new playback or change `finished`. The operation is
 asynchronous; `seek()` does not acknowledge audible arrival at the target.
 Keep observing `finished` for errors, as with volume changes.
@@ -125,8 +128,67 @@ old position. Stop removes unwritten seek commands from Node's queue; a seek
 already written to the pipe may run before the stop is processed.
 There is no sample-accurate or gapless-seeking guarantee.
 MP3 seeking may require decoding earlier frames and can be slower on long files.
-Position and duration getters are deliberately absent: the decoder cursor can
-lead audible output, and some streams have no reliable length.
+Use `getTiming()` to sample the mixer-consumed position after a seek completes.
+
+### Pause and resume
+
+`pause()` requests that this voice stop consuming PCM; `resume()` requests that it
+continue from that position. Both return `void`, like `seek()`. Repeated requests
+for the same state are harmless. Rapid transitions retain one in-flight transition
+and the latest requested state; intermediate transitions may be skipped. `state`
+changes to `paused` or `playing` only after acknowledgment. Until startup is
+acknowledged it remains `pending`, even if pause has already been requested.
+
+A pause made synchronously after `play()` is included in the initial play command,
+so the voice starts paused. After dispatch, some audio may already be buffered;
+pause cannot retract it. Resume never rewinds. Paused voices retain their buffer,
+decoder, device, and concurrency slot, and keep Node alive. Always stop or close
+playbacks that will not be resumed. Decoding may fill the bounded buffer while
+paused, then stops until space is freed or seeking is requested.
+
+Pause and resume after stopping, settlement, or closure do nothing. EOF, failure,
+and cancellation can win a race with either command. A seek at/beyond known duration
+ends even a paused playback. A paused voice can still fail on decoder/device/engine
+errors. A stuck transition fails the isolated engine after ten seconds; repeated
+requests cannot extend that deadline. Stop/abort/close remain bounded as before.
+
+### Position and duration
+
+```text
+interface PlaybackTiming {
+  readonly position: number;
+  readonly duration: number | null;
+}
+playback.getTiming(): Promise<PlaybackTiming | null>
+```
+
+`getTiming()` queries a snapshot, without background polling or wall-clock
+extrapolation. It waits for startup and outstanding seek/pause/resume operations.
+Overlapping calls share one promise and one immutable snapshot. Once that query
+has entered the pipe, later commands may occur after its snapshot. To observe a
+later command, await the earlier query, issue the command, then query again.
+
+- **Position** is absolute seconds of PCM handed from the stream buffer to the
+  mixer, including the seek offset. It is not the decoder's read-ahead cursor,
+  elapsed wall time, or the timestamp currently audible at the speaker.
+- It advances in mixer blocks, stays stable during pause and decoder starvation,
+  and jumps on seek. Without seeking it is nondecreasing. Conversion uses the
+  engine sample rate; fractional seconds do not imply sample-accurate delivery.
+  A snapshot may already be old when its promise resolves while playing.
+- **Duration** is decoder-reported output frames divided by the output sample
+  rate. WAV, MP3, and FLAC ordinarily supply it. `null` explicitly means no usable
+  length is available (including a decoder reporting zero); it is never estimated
+  from buffered data. It is not a promise of physical-device playback duration.
+- If normal completion, stop, abort, or close wins, the query resolves `null`.
+  Queries made after settlement or while stopping also resolve `null`. The library
+  does not invent a final position after losing an engine.
+- Pending queries reject on failure, as does `finished`. Observe **both** promises.
+  A query has a ten-second deadline, including time waiting for earlier controls.
+  Repeated calls cannot postpone it. Timeout fails all plays in that engine.
+
+A serial UI refresh loop can choose its own frequency (for example 250 ms).
+Do not launch an unbounded set of promise handlers or treat these snapshots as
+an audio/video synchronization clock. See the [pause recipe](recipes.md#pause-and-inspect-a-playback).
 
 ## Cancellation
 

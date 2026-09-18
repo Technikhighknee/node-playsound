@@ -95,6 +95,7 @@ static int buffering(const char* hex, const char* mode)
     ma_uint64 count;
     if (stream_read(&source, actual, STREAM_CHUNK, &count) != MA_SUCCESS || count != STREAM_CHUNK) return 1;
     ma_event_wait(&entered); // The source decoder is now blocked outside its lock.
+    if (!strcmp(mode, "pause-close-refill")) stream_pause(&source, 1);
     // The other worker must keep its own decoder moving across buffer wraps.
     ma_uint64 total = 0;
     double start = ps_seconds();
@@ -109,7 +110,7 @@ static int buffering(const char* hex, const char* mode)
     }
     if (total != source.length || total <= STREAM_CAPACITY * 2) return 1;
     stream_uninit(&peer);
-    if (!strcmp(mode, "close-refill")) {
+    if (!strcmp(mode, "close-refill") || !strcmp(mode, "pause-close-refill")) {
         ps_thread closing;
         atomic_store(&closed, 0);
         if (!ps_thread_start(&closing, close_stream, &source)) return 1;
@@ -169,7 +170,7 @@ static int seeking(const char* hex, const char* mode)
     if (!strcmp(mode, "unknown-length")) source->length = 0;
     if (!stream_attach(source)) return 1;
     for (int pass = 0; pass < 2; pass++) {
-        snprintf(line, sizeof(line), "Q 1 %s\n", pass ? "0" : "0.75");
+        snprintf(line, sizeof(line), "Q 1 %s 1\n", pass ? "0" : "0.75");
         if (command(&engine, line) != 1) return 1;
         float pcm[960];
         /* The mixer may consume only the newly published PCM, never decode. */
@@ -201,9 +202,86 @@ static int seeking(const char* hex, const char* mode)
     return 0;
 }
 
+static ma_uint64 cursor_of(ps_stream* s)
+{
+    stream_lock(s);
+    ma_uint64 cursor = s->cursor;
+    stream_unlock(s);
+    return cursor;
+}
+
+/* Deterministic mixer time: no device clock, sleeps only for decoder ownership. */
+static int pause_timing(const char* hex)
+{
+    ma_engine engine;
+    ma_engine_config config = ma_engine_config_init();
+    config.noDevice = MA_TRUE; config.channels = 2; config.sampleRate = 48000;
+    if (ma_engine_init(&config, &engine) != MA_SUCCESS) return 1;
+    char line[MAX_LINE]; float pcm[960];
+    snprintf(line, sizeof(line), "B 1 1 %s\n", hex);
+    if (command(&engine, line) != 1) return 1;
+    snprintf(line, sizeof(line), "P 2 1 %s\n", hex);
+    if (command(&engine, line) != 1) return 1;
+    ps_stream* a = &voices[0].stream;
+    ps_stream* b = &voices[1].stream;
+    for (int i = 0; i < 8; i++) if (ma_engine_read_pcm_frames(&engine, pcm, 480, NULL) != MA_SUCCESS) return 1;
+    if (cursor_of(a) != 0 || cursor_of(b) == 0) return 1;
+    strcpy(line, "T 1 1\n"); if (command(&engine, line) != 1) return 1;
+    strcpy(line, "A 1 2 0\n"); if (command(&engine, line) != 1) return 1;
+    for (int i = 0; i < 8; i++) ma_engine_read_pcm_frames(&engine, pcm, 480, NULL);
+    ma_uint64 before = cursor_of(a), peer = cursor_of(b);
+    if (!before) return 1;
+    strcpy(line, "A 1 3 1\n"); if (command(&engine, line) != 1) return 1;
+    strcpy(line, "A 1 4 1\n"); if (command(&engine, line) != 1) return 1;
+    for (int i = 0; i < 8; i++) ma_engine_read_pcm_frames(&engine, pcm, 480, NULL);
+    if (cursor_of(a) != before || cursor_of(b) <= peer) return 1;
+    for (int i = 0; i < 2; i++) {
+        snprintf(line, sizeof(line), "Q 1 %s 5\n", i ? "0.25" : "1.25");
+        if (command(&engine, line) != 1) return 1;
+        /* Resume/pause while decoder ownership is still in flight. */
+        strcpy(line, "A 1 6 0\n"); if (command(&engine, line) != 1) return 1;
+        strcpy(line, "A 1 7 1\n"); if (command(&engine, line) != 1) return 1;
+        double start = ps_seconds();
+        while (voices[0].seeking) {
+            poll_voices(); if (ps_seconds() - start > 5) return 1; ps_sleep(1);
+        }
+        for (int block = 0; block < 4; block++) ma_engine_read_pcm_frames(&engine, pcm, 480, NULL);
+        if (cursor_of(a) != (i ? 12000 : 60000)) return 1;
+        stream_lock(a);
+        if (a->count > STREAM_CAPACITY) return 1;
+        stream_unlock(a);
+        strcpy(line, "T 1 8\n"); if (command(&engine, line) != 1) return 1;
+    }
+    /* Unknown duration is explicit, without guessing from buffered frames. */
+    stream_detach(a); a->length = 0;
+    strcpy(line, "T 1 9\n"); if (command(&engine, line) != 1) return 1;
+    /* An error while paused still retires only the failed voice. */
+    atomic_store(&a->error, MA_IO_ERROR); poll_voices();
+    if (voices[0].id || !voices[1].id) return 1;
+    finish(&voices[1], "stopped");
+    /* With no decoder worker, drain a bounded stream then prove starvation
+       contributes no cursor movement (nor invented duration). */
+    ps_stream starved;
+    char path[65537]; if (!unhex(path, hex) || stream_init(&starved, path, 48000) != MA_SUCCESS) return 1;
+    ma_uint64 count;
+    for (int i = 0; i < STREAM_CAPACITY / 480 + 2; i++) stream_read(&starved, pcm, 480, &count);
+    before = cursor_of(&starved);
+    if (stream_read(&starved, pcm, 480, &count) != MA_BUSY || count || cursor_of(&starved) != before) return 1;
+    /* A malformed huge frame domain must fail, never wrap position to zero. */
+    stream_step(&starved);
+    starved.cursor = UINT64_MAX;
+    if (stream_read(&starved, pcm, 480, &count) != MA_BUSY || count ||
+        atomic_load(&starved.error) != MA_OUT_OF_RANGE) return 1;
+    stream_uninit(&starved);
+    ma_engine_uninit(&engine);
+    puts("PAUSE_TIMING_OK");
+    return 0;
+}
+
 static int run(int argc, char** argv)
 {
-    if (argc == 3 && (!strcmp(argv[2], "seek-refill") || !strcmp(argv[2], "close-refill") || !strcmp(argv[2], "stale-error")))
+    if (argc == 3 && !strcmp(argv[2], "pause-timing")) return pause_timing(argv[1]);
+    if (argc == 3 && (!strcmp(argv[2], "seek-refill") || !strcmp(argv[2], "close-refill") || !strcmp(argv[2], "pause-close-refill") || !strcmp(argv[2], "stale-error")))
         return buffering(argv[1], argv[2]);
     if (argc == 3) return seeking(argv[1], argv[2]);
     if (argc != 2) return 2;

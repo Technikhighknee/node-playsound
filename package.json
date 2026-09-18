@@ -1,6 +1,6 @@
 {
   "name": "node-playsound",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Play WAV, MP3, and FLAC files from Node.js on Windows, macOS, and Linux. Concurrent playback, seeking, and volume control with zero runtime dependencies.",
   "type": "module",
   "license": "CC0-1.0",
