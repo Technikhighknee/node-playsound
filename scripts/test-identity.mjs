@@ -25,11 +25,17 @@ try {
         execFileSync(resolve('.tmp/identity-probe.exe'), [String(active.child.pid), Buffer.from(active.name).toString('hex')],
           { stdio: 'inherit', windowsHide: true, timeout: 5000 });
       } else {
-        const streams = JSON.parse(execFileSync('pactl', ['--format=json', 'list', 'sink-inputs'], { encoding: 'utf8', timeout: 5000 }));
-        const own = streams.filter(s => s.properties['application.process.id'] === String(active.child.pid));
+        // PulseAudio 15's JSON encoder rejects non-ASCII strings. Its text
+        // property output preserves UTF-8; use a fixed locale for section names.
+        const output = execFileSync('pactl', ['list', 'sink-inputs'], {
+          encoding: 'utf8', timeout: 5000, env: { ...process.env, LC_ALL: 'C.UTF-8' },
+        });
+        const streams = output.split(/^Sink Input #/m).slice(1).map(block =>
+          Object.fromEntries([...block.matchAll(/^\s+([\w.-]+) = "(.*)"$/gm)].map(m => [m[1], m[2]])));
+        const own = streams.filter(s => s['application.process.id'] === String(active.child.pid));
         assert.equal(own.length, 1);
-        assert.equal(own[0].properties['application.name'], active.name);
-        assert.equal(own[0].properties['media.name'], active.name);
+        assert.equal(own[0]['application.name'], active.name);
+        assert.equal(own[0]['media.name'], active.name);
       }
     }
   }
