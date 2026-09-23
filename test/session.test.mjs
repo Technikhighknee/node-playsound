@@ -55,6 +55,15 @@ test('spawn failure is reported and close completes', { timeout: 5000 }, async t
   await engine.close();
 });
 
+test('audio identity failures retain device error semantics and explain labeling', { timeout: 5000 }, async t => {
+  const { engine, failed } = session(t, 'response:FATAL IDENTITY -2147467259');
+  engine.play(1, 'ignored', 1);
+  const error = await failed;
+  assert.equal(error.code, 'DEVICE_ERROR');
+  assert.match(error.message, /label the Windows audio session/);
+  await engine.close();
+});
+
 test('unresponsive startup is bounded', { timeout: 5000 }, async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { engine, failed } = session(t, 'hang');
