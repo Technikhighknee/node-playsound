@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { AudioError } from './errors.js';
+import { applicationName } from './identity.js';
 
 export type EngineEvent =
   | { type: 'started'; id: number }
@@ -25,6 +26,7 @@ export interface Engine {
 export type EngineFactory = (
   event: (event: EngineEvent) => void,
   failed: (error: AudioError) => void,
+  applicationName: string,
 ) => Engine;
 
 const supported = new Set(['win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64']);
@@ -65,7 +67,8 @@ export class Session implements Engine {
   #failure: (error: AudioError) => void;
 
   constructor(event: (event: EngineEvent) => void, failed: (error: AudioError) => void,
-    command: readonly [string, ...string[]] = [executable(), '--parent', String(process.pid)]) {
+    command: readonly [string, ...string[]] | undefined = undefined, name = applicationName(undefined)) {
+    command ??= [executable(), '--parent', String(process.pid), '--application-name', Buffer.from(name).toString('hex')];
     this.#event = event;
     this.#failure = failed;
     this.#child = spawn(command[0], command.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -150,7 +153,7 @@ export class Session implements Engine {
   }
 
   #line(line: string): boolean {
-    if (line === 'READY 3' && !this.#ready) {
+    if (line === 'READY 4' && !this.#ready) {
       this.#ready = true;
       clearTimeout(this.#startup);
       this.#flush();
@@ -158,6 +161,10 @@ export class Session implements Engine {
     }
     if (/^FATAL DEVICE -?\d+$/.test(line)) {
       this.fail(new AudioError('DEVICE_ERROR', `Could not use the system audio output (${line.split(' ')[2]}). Check that an output device and audio session are available.`));
+      return true;
+    }
+    if (/^FATAL IDENTITY -?\d+$/.test(line)) {
+      this.fail(new AudioError('DEVICE_ERROR', `Could not label the Windows audio session (${line.split(' ')[2]}). The audio device may have changed or become unavailable.`));
       return true;
     }
     if (line === 'FATAL TIMEOUT 0') {

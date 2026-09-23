@@ -24,6 +24,7 @@
 #define MAX_VOICES 256
 #define MAX_LINE 131200
 #include "platform.h"
+#include "identity.h"
 #include "stream.h"
 typedef struct { unsigned id; ma_sound sound; ps_stream stream; uint64_t seeking; } voice;
 static voice voices[MAX_VOICES];
@@ -31,6 +32,7 @@ static char mailbox[MAX_LINE];
 static ma_mutex inbox_lock;
 static int pending;
 static atomic_int device_lost;
+static atomic_int identity_dirty;
 static unsigned long parent_pid;
 #ifdef _WIN32
 static HANDLE parent_handle;
@@ -86,6 +88,14 @@ static void notification(const ma_device_notification* event)
 {
     if (event->type == ma_device_notification_type_stopped)
         atomic_store(&device_lost, 1);
+    if (event->type == ma_device_notification_type_rerouted)
+        atomic_store(&identity_dirty, 1);
+}
+
+static void render_audio(ma_device* device, void* output, const void* input, ma_uint32 frames)
+{
+    (void)input;
+    ma_engine_read_pcm_frames((ma_engine*)device->pUserData, output, frames, NULL);
 }
 
 static void finish(voice* v, const char* reason)
@@ -265,20 +275,27 @@ int main(int argc, char** argv)
 {
     ma_engine engine;
     ma_context context;
+    ma_device device;
     ps_thread reader;
     ps_thread watcher;
     ma_engine_config config = ma_engine_config_init();
+    ma_context_config context_config = ma_context_config_init();
+    ma_device_config device_config = ma_device_config_init(ma_device_type_playback);
     ma_result result;
     char line[MAX_LINE];
     int running = 1;
     setvbuf(stdout, NULL, _IONBF, 0);
     int parent_index = 1;
+    char application_name[256] = "Node.js";
 #ifdef PLAYSOUND_TEST
-    if (argc != 4 || strcmp(argv[1], "--null")) return 2;
+    if ((argc != 4 && argc != 6) || strcmp(argv[1], "--null")) return 2;
     parent_index = 2;
 #else
-    if (argc != 3) return 2;
+    if (argc != 5) return 2;
 #endif
+    if (argc == parent_index + 4 &&
+        (strcmp(argv[parent_index + 2], "--application-name") ||
+         !ps_identity_decode(argv[parent_index + 3], application_name))) return 2;
     if (strcmp(argv[parent_index], "--parent")) return 2;
     char* end;
     parent_pid = strtoul(argv[parent_index + 1], &end, 10);
@@ -292,23 +309,43 @@ int main(int argc, char** argv)
     if (!ps_thread_start(&reader, read_commands, NULL)) return 2;
 #ifdef PLAYSOUND_TEST
     ma_backend backend = ma_backend_null;
-    result = ma_context_init(&backend, 1, NULL, &context);
+    result = ma_context_init(&backend, 1, &context_config, &context);
 #else
-    result = ma_context_init(NULL, 0, NULL, &context);
+    context_config.pulse.pApplicationName = application_name;
+    result = ma_context_init(NULL, 0, &context_config, &context);
 #endif
     if (result != MA_SUCCESS) { printf("FATAL DEVICE %d\n", result); return 1; }
-    config.pContext = &context;
-    config.notificationCallback = notification;
-    result = ma_engine_init(&config, &engine);
+    device_config.playback.format = ma_format_f32;
+    device_config.noPreSilencedOutputBuffer = MA_TRUE;
+    device_config.noClip = MA_TRUE;
+    device_config.dataCallback = render_audio;
+    device_config.notificationCallback = notification;
+    device_config.pUserData = &engine;
+    device_config.pulse.pStreamNamePlayback = application_name;
+    result = ma_device_init(&context, &device_config, &device);
     if (result != MA_SUCCESS) { printf("FATAL DEVICE %d\n", result); ma_context_uninit(&context); return 1; }
-    if (!stream_pool_init()) { ma_engine_uninit(&engine); ma_context_uninit(&context); return 2; }
-    printf("READY 3\n");
+    config.pDevice = &device;
+    config.noAutoStart = MA_TRUE;
+    result = ma_engine_init(&config, &engine);
+    if (result != MA_SUCCESS) { printf("FATAL DEVICE %d\n", result); ma_device_uninit(&device); ma_context_uninit(&context); return 1; }
+    if (!stream_pool_init()) { ma_engine_uninit(&engine); ma_device_uninit(&device); ma_context_uninit(&context); return 2; }
+    if (context.backend == ma_backend_wasapi) {
+        result = ps_identity_set(application_name);
+        if (result != MA_SUCCESS) { printf("FATAL IDENTITY %d\n", result); running = -1; }
+    }
+    if (result == MA_SUCCESS) result = ma_engine_start(&engine);
+    if (result != MA_SUCCESS && running > 0) { printf("FATAL DEVICE %d\n", result); running = -1; }
+    if (running > 0) printf("READY 4\n");
     while (running > 0) {
         int have_line;
         ma_mutex_lock(&inbox_lock);
         have_line = pending;
         if (pending) { memcpy(line, mailbox, strlen(mailbox) + 1); pending = 0; }
         ma_mutex_unlock(&inbox_lock);
+        if (atomic_exchange(&identity_dirty, 0) && context.backend == ma_backend_wasapi) {
+            result = ps_identity_set(application_name);
+            if (result != MA_SUCCESS) { printf("FATAL IDENTITY %d\n", result); running = -1; break; }
+        }
         if (have_line) running = command(&engine, line);
         if (atomic_load(&device_lost)) { printf("FATAL DEVICE %d\n", MA_DEVICE_NOT_STARTED); running = -1; }
         poll_voices();
@@ -318,7 +355,11 @@ int main(int argc, char** argv)
         ma_sound_uninit(&voices[i].sound); stream_uninit(&voices[i].stream);
     }
     stream_pool_uninit();
+    /* Stop/join callbacks while their engine user data still exists. */
+    ma_device_stop(&device);
     ma_engine_uninit(&engine);
+    ma_device_uninit(&device);
+    ps_identity_close();
     ma_context_uninit(&context);
     /* The reader may be blocked on stdin. Process exit reclaims that thread;
        do not destroy its synchronization objects underneath it. */

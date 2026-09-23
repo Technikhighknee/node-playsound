@@ -93,7 +93,7 @@ one latest pending target per voice. It dispatches after `STARTED`, bounds
 each operation to ten seconds, and ignores late acknowledgments during stop
 or close. The existing completion gate handles natural-end and failure races.
 
-Protocol 3 uses `Q id seconds token` and `SEEKED id token`. Older helpers fail the startup
+Protocol 4 uses `Q id seconds token` and `SEEKED id token`. Older helpers fail the startup
 handshake instead of silently ignoring a new command. The native main thread
 converts seconds using the decoded output sample rate, checks the cached length, and
 ends beyond-end requests before any unsafe floating-point-to-integer cast.
@@ -167,7 +167,7 @@ cannot clear a newer deadline. Stop discards every unwritten control/query for i
 voice; bytes already accepted by the pipe retain their order. A pending seek cannot
 be cancelled by pause/resume: its decoder result remains authoritative. Completion
 or decoder failure can win over a pending command. Stale engine callbacks are fenced
-by engine identity. Protocol 3 rejects older executables at startup.
+by engine identity. Protocol 4 rejects older executables at startup.
 
 Native pause closes a gate under the short PCM lock before stopping the miniaudio
 sound through its public API. The callback only tries that lock, never waits. Resume
@@ -188,7 +188,7 @@ A synchronous position getter would conceal IPC staleness or require permanent
 polling. An event stream would create traffic even without readers. A single explicit
 snapshot keeps these costs bounded and lets applications choose their UI update rate.
 
-### Protocol 3 summary
+### Protocol 4 summary
 
 Only the native main thread writes responses. The mixer performs no IPC. Tokens
 are positive, safe JavaScript integers, echoed as decimal uint64 values; exhaustion
@@ -212,7 +212,16 @@ wrapping. The sound disables pitch conversion because PCM already uses the engin
 sample rate; the stream cursor still intentionally measures mixer input rather
 than downstream presentation time.
 
-## Evidence
+## Application identity
+
+[Application identity design](identity.md) describes the startup label, public
+option, OS-specific behavior, explicit device ownership, and limitations.
+Protocol 4 adds the bounded hex-encoded `--application-name` startup argument and
+`FATAL IDENTITY code` for Windows session-label failures (`DEVICE_ERROR` publicly).
+It keeps playback command ordering, queues, tokens, and concurrency unchanged.
+The production helper requires the argument and rejects older startup contracts.
+
+## Evidence and references
 
 - [Miniaudio manual and platform backend/build information](https://miniaud.io/docs/manual/index.html)
 - [Pinned upstream source](https://github.com/mackron/miniaudio/tree/0.11.23)

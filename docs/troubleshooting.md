@@ -1,5 +1,20 @@
 # Troubleshooting
 
+## The system mixer shows an unexpected application name
+
+The default label is the entry-point filename. Use a `Player` with
+`applicationName` for a product name. WASAPI session-aware mixers and Linux
+PulseAudio/PipeWire use that label. Core Audio, ALSA, legacy Windows backends,
+and tools that identify executable processes have different limits; see
+[application identity](identity.md). A label does not transfer audio ownership
+from the isolated helper to Node.
+
+`DEVICE_ERROR` with “Could not label the Windows audio session” means the system
+session metadata operation failed, often during a device change. Playback fails
+explicitly. Check that the device is still available, then start a new playback;
+the player's next helper receives the same label. Include the numeric error code
+when reporting a reproducible failure.
+
 [Quickstart](../README.md) · [API reference](api.md#errors) · [Recipes](recipes.md)
 
 Start with the error from `finished`, not a guessed audio backend setting:

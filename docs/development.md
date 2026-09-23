@@ -45,7 +45,24 @@ use a desktop session with audio enabled. An optional filename can follow
 device initialization and completion; someone should also listen on each
 supported platform before a public release.
 
-## Portable CPU targets
+## System audio identity checks
+
+After building production and test engines, run `node scripts/test-identity.mjs`
+on Windows with an output device, or Linux with a PulseAudio-compatible server
+and `pactl` available. It starts concurrent isolated helpers and independently
+reads their session/application/stream labels, including Unicode. Windows uses
+the `.tmp/identity-probe.exe` observer built by `build:test-native`; Linux CI
+starts a PulseAudio null sink, exercising the real server API without speakers.
+An optional argument selects an installed package's helper for archive testing.
+No observer or server utility is shipped as a runtime dependency.
+
+For a physical-device check, open a session-aware mixer, play with two distinct
+application names, and change the default Windows output while playback remains
+active. Confirm the new endpoint retains the label and playback controls still
+work. Process-based tools may show the helper regardless of its label; on macOS
+and ALSA this is an explicit platform limitation, not a failed naming promise.
+
+## Portable CPU baseline
 
 Native builds select a CPU baseline explicitly. Zig uses `-mcpu=baseline`;
 GCC/Clang use `-march=x86-64` or `-march=armv8-a`. These flags apply to both

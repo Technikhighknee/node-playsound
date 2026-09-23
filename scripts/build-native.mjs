@@ -23,7 +23,7 @@ const cpuFlags = /^zig(?:\.exe)?$/i.test(basename(compiler))
   ? ['-mcpu=baseline']
   : [arch === 'x64' ? '-march=x86-64' : '-march=armv8-a'];
 const args = [...flags, ...cpuFlags, '-std=c11', '-O2', '-g0', '-DNDEBUG', ...(test ? ['-DPLAYSOUND_TEST'] : []),
-  render ? 'test/render.c' : 'native/player.c', '-o', output, ...(platform === 'win32' ? [] : ['-lpthread', '-lm', ...(platform === 'linux' ? ['-ldl'] : [])])];
+  render ? 'test/render.c' : 'native/player.c', 'native/identity.c', '-o', output, ...(platform === 'win32' ? ['-lole32'] : ['-lpthread', '-lm', ...(platform === 'linux' ? ['-ldl'] : [])])];
 const result = spawnSync(compiler, args, { stdio: 'inherit', windowsHide: true });
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status ?? 1);
@@ -31,8 +31,15 @@ chmodSync(output, 0o755);
 // Some Windows compilers emit a sidecar even when debug information is off.
 rmSync(output.replace(/\.exe$/, '') + '.pdb', { force: true });
 writeFileSync(test ? `${output}.json` : resolve(directory, 'manifest.json'), JSON.stringify({
-  protocol: 3, platform, arch, sourceSha256: sourceHash(),
+  protocol: 4, platform, arch, sourceSha256: sourceHash(),
   ...(render ? { renderSha256: createHash('sha256').update(readFileSync('test/render.c')).digest('hex') } : {}),
   binarySha256: createHash('sha256').update(readFileSync(output)).digest('hex'),
 }, null, 2) + '\n');
 console.log(output);
+if (test && !render && platform === 'win32') {
+  const probe = spawnSync(compiler, [...flags, ...cpuFlags, '-std=c11', '-O2',
+    'test/identity-windows.c', 'native/identity.c', '-lole32', '-o', resolve('.tmp/identity-probe.exe')],
+    { stdio: 'inherit', windowsHide: true });
+  if (probe.error) throw probe.error;
+  if (probe.status !== 0) process.exit(probe.status ?? 1);
+}

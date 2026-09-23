@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AudioError } from './errors.js';
 import { Session } from './session.js';
+import { applicationName } from './identity.js';
 import type { Engine, EngineEvent, EngineFactory } from './session.js';
 
 export type PlaybackResult = 'ended' | 'stopped';
@@ -17,6 +18,8 @@ export interface PlayOptions {
 }
 export interface SoundOptions { volume?: number }
 export interface PlayerOptions {
+  /** Application label in supported system audio controls. Defaults to the entry-point filename. */
+  applicationName?: string;
   /** Maximum pending, playing, and paused plays, from 1 to 256. Default: 64. */
   maxConcurrent?: number;
 }
@@ -139,6 +142,7 @@ interface Entry {
 export class Controller {
   #limit: number;
   #factory: EngineFactory;
+  #applicationName: string;
   #engine: Engine | undefined;
   #retiring = new Set<Promise<void>>();
   #entries = new Map<number, Entry>();
@@ -147,13 +151,15 @@ export class Controller {
   #closePromise: Promise<void> | undefined;
   #idle: NodeJS.Timeout | undefined;
 
-  constructor(options: PlayerOptions = {}, factory: EngineFactory = (event, failed) => new Session(event, failed)) {
+  constructor(options: PlayerOptions = {}, factory?: EngineFactory) {
     object(options, 'Player options');
+    const name = applicationName(options.applicationName);
+    this.#applicationName = name;
     const limit = options.maxConcurrent === undefined ? 64 : options.maxConcurrent;
     if (!Number.isInteger(limit) || limit < 1 || limit > 256)
       throw new RangeError('maxConcurrent must be an integer between 1 and 256.');
     this.#limit = limit;
-    this.#factory = factory;
+    this.#factory = factory ?? ((event, failed, name) => new Session(event, failed, undefined, name));
   }
 
   sound(file: AudioFile, options: SoundOptions = {}): Sound {
@@ -230,7 +236,7 @@ export class Controller {
           this.#engine = undefined;
           this.#retire(engine);
           for (const current of [...this.#entries.values()]) this.#settle(current, error);
-        });
+        }, this.#applicationName);
         this.#engine = engine;
       }
       entry.sent = true;

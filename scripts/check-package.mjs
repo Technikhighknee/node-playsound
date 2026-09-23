@@ -15,7 +15,7 @@ export function checkPackage(selected = targets) {
     let manifest;
     try { manifest = JSON.parse(readFileSync(`bin/${target}/manifest.json`, 'utf8')); }
     catch { throw new Error(`Missing ${target} build. Assemble all six CI artifacts before packing a release.`); }
-    if (manifest.protocol !== 3 || manifest.platform !== platform || manifest.arch !== arch || manifest.sourceSha256 !== sourceHash() || manifest.binarySha256 !== digest(file))
+    if (manifest.protocol !== 4 || manifest.platform !== platform || manifest.arch !== arch || manifest.sourceSha256 !== sourceHash() || manifest.binarySha256 !== digest(file))
       throw new Error(`Stale or mismatched ${target} binary. Rebuild from this exact source tree.`);
     const bytes = readFileSync(file);
     if (platform === 'win32') {
