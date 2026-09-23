@@ -2,6 +2,41 @@
 
 [Documentation](../README.md#documentation) · [API reference](api.md)
 
+## Application identity validation (2026-09-23)
+
+The implementation for [issue #7](https://github.com/Technikhighknee/node-playsound/issues/7)
+uses protocol 4. Review the associated PR's **Build and verify** checks for the
+exact tested commit and six-platform archive; artifacts from protocol 3 are stale.
+
+Local Windows x64 / Node 24.14.0 checks passed: all 115 tests, strict typechecking,
+16 compiled documentation examples, documentation links, production-device
+playback, and an installed ESM/TypeScript consumer with install scripts disabled.
+The native identity translation unit also compiles with `-Wall -Wextra
+-Wconversion -Werror`. The miniaudio vendor checksum is unchanged.
+
+An independent Windows COM observer queried the real audio-session display names
+for three simultaneous helpers, including distinct names, repeated names, and
+Unicode. Every session had its requested label and retained its own PID. The
+Linux CI integration check runs the production helper against a real PulseAudio
+server with a null sink and reads both application and stream properties by PID.
+It uses text output because the PulseAudio 15 JSON encoder rejects non-ASCII
+strings. This is stronger evidence than inspecting configuration or using only
+the library's null backend. It is not a claim about every desktop mixer's UI.
+
+The regression suite retains cancellation, timeouts, backpressure, 256 native
+voices, paused teardown, streaming/seek correctness, and parent/worker death.
+New coverage verifies bounded Unicode names, invalid UTF-8 startup rejection,
+independent player identity, idle restarts, naming failures, public types, and
+package contents. CI retains Node 22/24 on Windows/macOS/Linux x64/ARM64,
+ASan/UBSan/leak checks, six-engine assembly, and npm publication dry-run.
+
+Not hardware-verified here: Windows physical output-device rerouting, individual
+third-party mixer UIs, PipeWire's compatibility server, and macOS/Linux speaker
+listening. The Windows metadata check uses a real device; the Linux check uses
+PulseAudio, not a mock of its API. Core Audio process attribution and ALSA's lack
+of an application-label API remain documented limits, not untested promises of
+parent-process attribution. See [platform behavior and design](identity.md).
+
 ## Pause and timing validation (2026-09-17)
 
 The 0.2.0 pause/timing change is tracked in [PR #6](https://github.com/Technikhighknee/node-playsound/pull/6).
