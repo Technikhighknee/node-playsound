@@ -87,6 +87,10 @@ try {
 
 `close()` stops the player's pending and active sounds, waits for cleanup,
 and permanently closes that player. Other players are independent.
+For system audio controls, `new Player({ applicationName: 'My app' })` supplies
+an application label; the default is your entry-point filename. Windows WASAPI
+and Linux PulseAudio/PipeWire use it. macOS still identifies the isolated helper
+process. [Platform details](docs/identity.md) explain the distinction.
 Pass an `AbortSignal` to `play()` to tie a sound to an operation's cancellation.
 [Recipes cover cancellation, background notifications, paths, and shutdown.](docs/recipes.md)
 

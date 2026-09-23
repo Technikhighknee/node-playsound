@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Identify audio with the consuming entry-point filename by default; add
+  `Player({ applicationName })` for an explicit application label.
+- Set Windows WASAPI session display names and Linux PulseAudio/PipeWire
+  application and stream names. Preserve process isolation; document macOS,
+  ALSA, legacy Windows, and process-based UI limitations.
+- Use protocol 4 with a bounded, Unicode-safe startup identity and explicit
+  Windows labeling failures. No runtime dependency or install-time build added.
+
 ## 0.2.0
 
 - Add individual playback pause/resume and acknowledged `paused` state.

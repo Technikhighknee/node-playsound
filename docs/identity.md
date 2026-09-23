@@ -1,11 +1,31 @@
 # Application identity in system audio controls
 
+Use `new Player({ applicationName: 'My application' })` when a filename is not
+a useful label. Existing `play(file)` calls automatically use the entry-point
+filename. No metadata scan or additional installation step is required.
+
+| Output | Behavior |
+| --- | --- |
+| Windows WASAPI | Sets the session display name used by session-aware mixers such as Sndvol; reapplies after device rerouting |
+| Linux PulseAudio / PipeWire PulseAudio server | Sets both application and playback stream names |
+| Linux ALSA | No equivalent application label API |
+| macOS Core Audio | Process attribution remains the isolated helper; no supported parent-identity override |
+| Legacy Windows fallback backends | Playback remains available; custom presentation is not guaranteed |
+
+Tools that identify applications by executable path, PID, or bundle identity can
+still show `playsound`, including Windows tools that ignore session display names.
+This option does not set an application icon, create media controls, merge players,
+or change which process is captured by process-based audio recording tools.
+During a Windows device reroute, the OS can briefly show its default label before
+the helper's main thread applies the name. Naming errors on WASAPI reject active
+playbacks with `DEVICE_ERROR` and terminate that helper; other players are unaffected.
+
 ## Design
 
 Audio remains owned by the isolated helper process. A display label is not a
 transfer of process ownership, permission, routing, or capture identity.
 
-The proposed additive API is `new Player({ applicationName: 'My application' })`.
+The additive API is `new Player({ applicationName: 'My application' })`.
 Without an override, use the entry-point filename (including its extension),
 or the executable filename when there is no entry point. Capture the name at
 player construction; retain it across helper restarts. Do not search package
@@ -17,7 +37,7 @@ fall back to `Node.js`.
 
 Pass the bounded name as a hex-encoded helper argument, not a shell command or
 mutable ambient environment variable. A helper cannot start without understanding
-the new startup contract. Playback commands and their ordering remain unchanged.
+the new startup contract (protocol 4). Playback commands and their ordering remain unchanged.
 
 ### Windows
 
@@ -52,10 +72,11 @@ Stop the device before destroying the engine; destroy the device before its
 context. No per-play identity state, polling, queue, worker, or timer is needed.
 Reroute notifications only set an atomic flag for main-thread work.
 
-Tests must cover name inference/validation, argument encoding, startup rejection,
-independent players and restarts, and the existing native/lifecycle suite. Verify
-real Windows session metadata and PulseAudio metadata where an audio server is
-available; null-backend tests alone cannot establish OS presentation.
+Tests cover name inference/validation, argument encoding, startup rejection,
+independent players and restarts, and the existing native/lifecycle suite.
+`scripts/test-identity.mjs` verifies real Windows session metadata or PulseAudio
+metadata where an audio server is available; null-backend tests alone cannot
+establish OS presentation. See [validation evidence](validation.md).
 
 ## Platform references
 
