@@ -25,6 +25,17 @@ test('application names are bounded, lossless Unicode labels', async () => {
   }
 });
 
+test('oversized application labels are rejected before UTF-8 allocation', t => {
+  const from = Buffer.from;
+  t.mock.method(Buffer, 'from', (value, ...args) => {
+    assert.ok(typeof value !== 'string' || value.length <= 255, 'Validate length before encoding');
+    return from(value, ...args);
+  });
+  const enormous = 'x'.repeat(1_000_000);
+  assert.throws(() => new Player({ applicationName: enormous }), /applicationName/);
+  assert.equal(applicationName(undefined, enormous, 'node'), 'Node.js');
+});
+
 test('independent players capture names once and preserve them across idle restarts', { timeout: 5000 }, async t => {
   const { path } = await fixture(t);
   const calls = [];

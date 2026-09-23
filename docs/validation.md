@@ -8,7 +8,7 @@ The implementation for [issue #7](https://github.com/Technikhighknee/node-playso
 uses protocol 4. Review the associated PR's **Build and verify** checks for the
 exact tested commit and six-platform archive; artifacts from protocol 3 are stale.
 
-Local Windows x64 / Node 24.14.0 checks passed: all 115 tests, strict typechecking,
+Local Windows x64 / Node 24.14.0 checks passed: all 116 tests, strict typechecking,
 16 compiled documentation examples, documentation links, production-device
 playback, and an installed ESM/TypeScript consumer with install scripts disabled.
 The native identity translation unit also compiles with `-Wall -Wextra
