@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Identify audio with the consuming entry-point filename by default; add
   `Player({ applicationName })` for an explicit application label.
