@@ -1,5 +1,19 @@
 # Recipes
 
+## Name your application in system audio controls
+
+```ts
+import { Player } from 'node-playsound';
+
+await using audio = new Player({ applicationName: 'Focus timer' });
+await audio.play('./bell.wav').finished;
+```
+
+Without this option, the label is your entry-point filename. Windows WASAPI and
+Linux PulseAudio/PipeWire expose the name; macOS Core Audio still attributes the
+sound to the helper process. [Platform details](identity.md) explain which system
+tools honor labels and which identify the executable itself.
+
 [Quickstart](../README.md) · [API reference](api.md) · [Troubleshooting](troubleshooting.md)
 
 Every example observes completion. Attach an error handler immediately if the

@@ -40,6 +40,16 @@ jobs:
       - run: npm run build:native
       - run: npm run build:test-native
       - run: npm run check
+      - name: Verify application and stream labels through PulseAudio
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pulseaudio
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=identity-test
+          pactl set-default-sink identity-test
+          node scripts/test-identity.mjs
+          pactl exit
       - run: npm run test:package -- --local
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

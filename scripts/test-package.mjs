@@ -45,7 +45,7 @@ assert.equal(await paused.getTiming(), null);
 await paused.finished;
 assert.equal(await play('unused.wav', { signal: cancelled }).finished, 'stopped');
 assert.equal(await sound('unused.wav').play({ signal: cancelled }).finished, 'stopped');
-const player = new Player({ maxConcurrent: 2 });
+const player = new Player({ maxConcurrent: 2, applicationName: 'Installed application' });
 await player.close();
 await assert.rejects(player.play('unused.wav').finished, error => error instanceof AudioError && error.code === 'PLAYER_CLOSED');
 console.log('Installed ESM package works without runtime dependencies.');
@@ -73,7 +73,7 @@ if (snapshot) {
 void playback.stop();
 void result;
 void sound('tone.wav').play();
-void new Player()[Symbol.asyncDispose]();
+void new Player({ applicationName: 'Installed application' })[Symbol.asyncDispose]();
 void new AudioError('DEVICE_ERROR', 'No device');
 // @ts-expect-error gain is a number
 play('tone.wav', { volume: 'loud' });

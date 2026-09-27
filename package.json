@@ -1,19 +1,58 @@
 {
   "name": "node-playsound",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Play WAV, MP3, and FLAC files from Node.js on Windows, macOS, and Linux. Concurrent playback, seeking, and volume control with zero runtime dependencies.",
   "type": "module",
   "license": "CC0-1.0",
-  "repository": { "type": "git", "url": "git+https://github.com/Technikhighknee/node-playsound.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Technikhighknee/node-playsound.git"
+  },
   "homepage": "https://github.com/Technikhighknee/node-playsound#readme",
-  "bugs": { "url": "https://github.com/Technikhighknee/node-playsound/issues" },
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
-  "engines": { "node": ">=22" },
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "bugs": {
+    "url": "https://github.com/Technikhighknee/node-playsound/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "types": "./dist/index.d.ts",
-  "files": ["dist", "bin/*/playsound", "bin/*/playsound.exe", "bin/*/manifest.json", "docs", "examples", "LICENSE", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md"],
+  "files": [
+    "dist",
+    "bin/*/playsound",
+    "bin/*/playsound.exe",
+    "bin/*/manifest.json",
+    "docs",
+    "examples",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "CHANGELOG.md"
+  ],
   "sideEffects": false,
-  "keywords": ["nodejs", "audio", "audio-playback", "audio-player", "sound", "play-sound", "mp3", "wav", "flac", "typescript", "esm", "cross-platform", "zero-dependencies"],
+  "keywords": [
+    "nodejs",
+    "audio",
+    "audio-playback",
+    "audio-player",
+    "sound",
+    "play-sound",
+    "mp3",
+    "wav",
+    "flac",
+    "typescript",
+    "esm",
+    "cross-platform",
+    "zero-dependencies"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -29,5 +68,8 @@
     "prepack": "npm run build && node scripts/prepack.mjs",
     "prepublishOnly": "node scripts/check-package.mjs"
   },
-  "devDependencies": { "@types/node": "^22.0.0", "typescript": "~5.9.3" }
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.9.3"
+  }
 }

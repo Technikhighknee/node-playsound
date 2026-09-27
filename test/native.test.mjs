@@ -60,17 +60,43 @@ test('native: a stalled background decoder exits with a bounded timeout', { time
   });
 });
 
-async function engine(t) {
-  const child = spawn(binary, ['--null', '--parent', String(process.pid)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+async function engine(t, name) {
+  const child = spawn(binary, ['--null', '--parent', String(process.pid),
+    ...(name === undefined ? [] : ['--application-name', Buffer.from(name).toString('hex')])], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const closed = once(child, 'close');
   t.after(async () => { child.stdin.end(); await closed; });
   child.stdin.on('error', () => {});
   let stderr = '';
   child.stderr.on('data', data => { stderr += data; });
   const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
-  assert.equal((await lines.next()).value, 'READY 3', stderr);
+  assert.equal((await lines.next()).value, 'READY 4', stderr);
   return { child, closed, next: async () => (await lines.next()).value, send: text => child.stdin.write(`${text}\n`) };
 }
+
+test('native: bounded Unicode application names survive startup and playback', { timeout: 10000 }, async t => {
+  const { path } = await fixture(t, 0.02);
+  for (const name of ['音 🎵 " & --null', 'a'.repeat(255), '音'.repeat(85)]) {
+    const e = await engine(t, name);
+    e.send(`P 1 0 ${Buffer.from(path).toString('hex')}`);
+    assert.equal(await e.next(), 'STARTED 1');
+    assert.equal(await e.next(), 'DONE 1 ended');
+    e.send('QUIT');
+    await e.closed;
+  }
+});
+
+test('native: malformed application identity is rejected before device startup', { timeout: 10000 }, async () => {
+  for (const hex of ['', '0', 'xx', '00', '0a', '7f', 'c285', '20', 'e38080', 'efbbbf',
+    '80', 'c080', 'eda080', 'f4908080', 'f09f', 'ff', '61'.repeat(256)]) {
+    await assert.rejects(promisify(execFile)(binary,
+      ['--null', '--parent', String(process.pid), '--application-name', hex],
+      { windowsHide: true, timeout: 3000 }), error => {
+        assert.equal(error.code, 2);
+        assert.equal(error.stdout, '');
+        return true;
+      });
+  }
+});
 
 test('native: concurrent Unicode-path playback completes independently', { timeout: 10000 }, async t => {
   const { path } = await fixture(t, 0.15);

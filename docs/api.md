@@ -34,12 +34,24 @@ See [path examples](recipes.md#resolve-files-reliably).
 | `volume` | `play`, `sound` | `1` | Finite linear gain between 0 and 1 |
 | `signal` | `play` | none | AbortSignal; abortion stops this play |
 | `maxConcurrent` | `Player` | `64` | Integer 1–256; includes pending and paused playback |
+| `applicationName` | `Player` | Entry-point filename | Application label in supported system audio controls; see [platform behavior](identity.md) |
 
 `sound(file, options).play(options)` takes the same playback options as
 `play`. Per-play volume overrides the captured default. A sound is immutable
 configuration, with no open file or device to dispose. Repeated calls share
 the player's mixer, not the playhead. Each play can be stopped independently.
 There is no implicit queue when the concurrency limit is reached.
+
+`applicationName` is captured at construction, including for the shared player
+when `play()` or `sound()` first creates it. The default uses `process.argv[1]`'s
+filename including its extension, or `process.execPath`'s filename without an
+entry point. It never reads package metadata or exposes a full path. Unusable
+inferred names fall back to `Node.js`. An explicit name must be nonblank, valid
+Unicode, contain no C0/C1 control characters, and fit in 255 UTF-8 bytes;
+otherwise construction throws `TypeError`. Valid names are preserved verbatim.
+The label persists across idle helper restarts and does not merge separate
+players' audio sessions. Changing it requires a new player. No existing playback
+call needs to change. The name does not change the OS process that owns audio.
 
 ## Player and Sound
 
